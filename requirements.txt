@@ -1,0 +1,6 @@
+photoshop==0.21.9
+Pillow==10.4.0
+psutil==7.0.0
+aiofiles==24.1.0
+python-dotenv==1.0.1
+
