@@ -5,7 +5,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from .photoshop_service import PhotoshopJob, PhotoshopService
+from .photoshop_service import replace_and_export
+from .utils import close_photoshop_process
 
 
 def parse_args() -> argparse.Namespace:
@@ -22,19 +23,17 @@ def main() -> None:
     load_dotenv()
     args = parse_args()
 
-    service = PhotoshopService(tile_size=args.tile_size)
-    job = PhotoshopJob(
-        png_path=Path(args.png),
-        psd_path=Path(args.psd),
-        export_dir=Path(args.output),
-        artboard_name=args.artboard,
-    )
-
     try:
-        export_path = service.replace_and_export(job)
+        export_path = replace_and_export(
+            png_path=Path(args.png),
+            psd_path=Path(args.psd),
+            export_dir=Path(args.output),
+            artboard_name=args.artboard,
+            tile_size=args.tile_size,
+        )
         print(f"✅ 已导出：{export_path}")
     except Exception as exc:
-        service.close_photoshop_process()
+        close_photoshop_process()
         raise SystemExit(f"❌ 处理失败：{exc}") from exc
 
 
