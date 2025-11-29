@@ -3,6 +3,7 @@ from photoshop import Session
 with Session() as session:
     app = session.app
     doc = app.open("D:/workspace/yishe-ps/examples/test.psd")
+    # doc = app.open("../examples/test.psd")
     
     # 1. 打印文档基本信息
     print("=" * 60)
