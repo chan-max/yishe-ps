@@ -1,6 +1,7 @@
 """yishe-ps 服务包初始化。"""
 
 from .photoshop_service import replace_and_export
+from .psd_parser import export_psd_to_json, parse_psd_to_dict
 from .utils import (
     close_photoshop_process,
     ensure_photoshop_running,
@@ -14,6 +15,9 @@ from .utils import (
 __all__ = [
     # 核心服务
     "replace_and_export",
+    # PSD 解析
+    "export_psd_to_json",
+    "parse_psd_to_dict",
     # 工具函数
     "resize_image_in_tiles",
     "validate_job_inputs",

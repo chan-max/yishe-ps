@@ -27,6 +27,33 @@
    - 一份包含智能对象的 PSD 模板
    - 一张用于替换的 PNG/JPG 图片
 
+4. **PSD 解析并导出 JSON：**
+   ```
+   python -m src.psd_parser --psd "D:\模板\template.psd" --output "D:\输出\template_info.json"
+   ```
+   功能说明：
+   - 解析 PSD 文件的所有信息（文档信息、图层结构、图层属性等）
+   - 导出为结构化的 JSON 文件
+   - 支持递归提取所有图层（包括图层组、智能对象、文本图层等）
+   - 不需要 Photoshop 运行，纯 Python 实现
+
+5. **测试 PSD 解析功能：**
+   ```
+   python src/test_psd_parser.py
+   ```
+   使用 `examples/shirt.psd` 文件进行测试，会：
+   - 解析 PSD 文件并导出 JSON
+   - 显示文档基本信息和图层统计
+   - 展示图层结构树
+   - 列出所有智能对象
+   - 验证导出的 JSON 文件
+
+5. **测试 PSD 解析功能：**
+   ```
+   python -m src.test_psd_parser
+   ```
+   使用 `examples/shirt.psd` 文件进行测试，会显示详细的解析结果和统计信息。
+
 ### 目录结构
 
 ```
@@ -35,6 +62,8 @@ yishe-ps/
 ├── src/
 │   ├── __init__.py          # 包初始化，导出主要接口
 │   ├── photoshop_service.py # Photoshop 核心操作函数（智能对象替换、导出等）
+│   ├── psd_parser.py        # PSD 解析并导出 JSON（使用 psd-tools）
+│   ├── test_psd_parser.py   # PSD 解析功能测试文件
 │   ├── simple_example.py    # 简单的连接和打开 PSD 示例
 │   ├── example_usage.py     # 完整的套图流程示例
 │   └── utils/               # 通用工具函数模块
@@ -46,7 +75,8 @@ yishe-ps/
 ```
 
 **模块说明：**
-- `photoshop_service.py`：核心业务逻辑，处理 Photoshop 文档操作
+- `photoshop_service.py`：核心业务逻辑，处理 Photoshop 文档操作（需要 Photoshop 运行）
+- `psd_parser.py`：PSD 文件解析，提取所有信息并导出为 JSON（不需要 Photoshop）
 - `utils/photoshop_process.py`：进程管理相关（自动启动、关闭 Photoshop）
 - `utils/image_utils.py`：图像处理工具（分块缩放等通用方法）
 - `utils/file_utils.py`：文件路径验证和目录创建
@@ -57,6 +87,7 @@ yishe-ps/
 - ✅ **智能查找 Photoshop 路径**：自动从常见安装路径和注册表查找 Photoshop
 - ✅ **函数式设计**：所有功能都是独立函数，无需类实例化
 - ✅ **资源管理**：自动处理 Photoshop 会话和内存清理
+- ✅ **PSD 解析**：使用 `psd-tools` 解析 PSD 文件，提取所有图层信息并导出为 JSON（跨平台，不需要 Photoshop）
 
 ### 后续扩展建议
 
