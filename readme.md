@@ -2,6 +2,19 @@
 
 基于 `photoshop-python-api` 的自动化生产服务脚手架。此仓库从 `ps_client` 项目中提炼了与 Photoshop 交互的核心能力，提供一套轻量的服务化基础和示例，便于快速二次开发。
 
+### 🚀 新增功能：API 服务
+
+现在支持通过 HTTP API 接口调用功能，更方便集成到其他系统中！
+
+**快速启动 API 服务**：
+```bash
+python start_api_server.py
+```
+
+然后访问 http://localhost:1595/docs 查看 API 文档。
+
+详细使用说明请查看 [API_USAGE.md](API_USAGE.md)
+
 ### 快速开始
 
 1. 创建虚拟环境并安装依赖：

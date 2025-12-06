@@ -1,7 +1,10 @@
 photoshop==0.21.9
-Pillow==10.4.0
+Pillow>=11.0.0
 psutil==7.0.0
 aiofiles==24.1.0
 python-dotenv==1.0.1
 psd-tools>=1.9.0
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.0.0
 
