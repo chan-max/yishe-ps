@@ -168,12 +168,37 @@ class ProcessRequest(BaseModel):
             }
         }
     
-    @validator('psd_path', 'image_path', 'export_dir')
+    @validator('psd_path', 'image_path')
     def validate_paths(cls, v):
-        """验证路径是否存在"""
+        """验证文件路径是否存在"""
         path = Path(v)
         if not path.exists():
             raise ValueError(f"路径不存在: {v}")
+        return str(path.absolute())
+    
+    @validator('export_dir')
+    def validate_export_dir(cls, v):
+        """验证导出目录（允许不存在，会自动创建）"""
+        path = Path(v)
+        # 检查是否是文件路径（不应该有扩展名）
+        if path.suffix:
+            raise ValueError(f"export_dir 必须是目录路径，不能是文件: {v}")
+        # 如果目录不存在，尝试创建（检查父目录是否存在）
+        if not path.exists():
+            # 检查父目录是否存在
+            parent = path.parent
+            if parent != path and not parent.exists():
+                raise ValueError(f"无法创建导出目录，父目录不存在: {v}")
+            # 尝试创建目录以验证权限
+            try:
+                path.mkdir(parents=True, exist_ok=True)
+            except PermissionError:
+                raise ValueError(f"没有权限创建导出目录: {v}")
+            except Exception as e:
+                raise ValueError(f"无法创建导出目录: {v}, 错误: {e}")
+        # 检查是否有写入权限
+        if not os.access(path, os.W_OK):
+            raise ValueError(f"导出目录没有写入权限: {v}")
         return str(path.absolute())
     
     @validator('psd_path')

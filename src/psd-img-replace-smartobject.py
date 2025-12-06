@@ -575,14 +575,27 @@ def replace_and_export_psd(
         print("=" * 70)
         
         # 查找智能对象图层
-        smart_objects = find_smart_object_layers(doc, smart_object_name)
-        
-        if not smart_objects:
-            doc.close()
-            raise ValueError(
-                f"未找到智能对象图层" + 
-                (f"（名称: {smart_object_name}）" if smart_object_name else "")
-            )
+        # 如果指定了名称，先查找所有智能对象以便提供更好的错误信息
+        if smart_object_name:
+            all_smart_objects = find_smart_object_layers(doc, None)
+            smart_objects = find_smart_object_layers(doc, smart_object_name)
+            
+            if not smart_objects:
+                doc.close()
+                if all_smart_objects:
+                    available_names = [so['name'] for so in all_smart_objects]
+                    raise ValueError(
+                        f"未找到名为 '{smart_object_name}' 的智能对象图层。\n"
+                        f"可用的智能对象名称: {', '.join(available_names)}\n"
+                        f"提示: 如果不指定 smart_object_name，将自动使用第一个找到的智能对象"
+                    )
+                else:
+                    raise ValueError("PSD 文件中没有找到任何智能对象图层")
+        else:
+            smart_objects = find_smart_object_layers(doc, None)
+            if not smart_objects:
+                doc.close()
+                raise ValueError("PSD 文件中没有找到任何智能对象图层")
         
         # ========== 打印智能对象详细信息 ==========
         print("\n" + "=" * 70)
