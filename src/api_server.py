@@ -33,8 +33,44 @@ except ImportError:
 # 创建 FastAPI 应用
 app = FastAPI(
     title="PSD 智能对象替换服务",
-    description="提供 PSD 智能对象替换和导出功能的 API 服务",
-    version="1.0.0"
+    description="""
+## PSD 智能对象替换 API 服务
+
+提供 PSD 智能对象替换和导出功能的 HTTP API 接口。
+
+### 主要功能
+
+- ✅ 替换 PSD 中的智能对象图层
+- ✅ 自动缩放图片适配智能对象尺寸
+- ✅ 导出处理后的图片
+- ✅ 支持批量处理
+- ✅ 详细的错误信息和日志
+
+### 使用说明
+
+1. 确保 Photoshop 已安装并可访问
+2. 提供正确的文件路径（PSD、图片、导出目录）
+3. 可选指定智能对象名称，不指定则替换第一个找到的
+
+### 注意事项
+
+- 建议以管理员权限运行服务，避免权限问题
+- 由于 Photoshop 限制，不支持并发处理
+- 批量处理会串行执行
+    """,
+    version="1.0.0",
+    docs_url="/docs",  # Swagger UI 路径
+    openapi_url="/openapi.json",  # OpenAPI JSON 路径
+    # 自定义 Swagger UI 配置
+    swagger_ui_parameters={
+        "deepLinking": True,  # 启用深度链接
+        "displayRequestDuration": True,  # 显示请求耗时
+        "filter": True,  # 启用过滤器
+        "tryItOutEnabled": True,  # 启用"试用"功能
+        "requestSnippetsEnabled": True,  # 启用请求代码片段
+        "defaultModelsExpandDepth": 2,  # 默认展开模型深度
+        "defaultModelExpandDepth": 2,  # 默认展开模型深度
+    }
 )
 
 
@@ -42,13 +78,95 @@ app = FastAPI(
 
 class ProcessRequest(BaseModel):
     """处理请求模型"""
-    psd_path: str = Field(..., description="PSD 套图文件路径")
-    image_path: str = Field(..., description="素材图片路径")
-    export_dir: str = Field(..., description="导出目录路径")
-    smart_object_name: Optional[str] = Field(None, description="智能对象图层名称（可选，不指定则替换第一个找到的）")
-    output_filename: Optional[str] = Field(None, description="导出文件名（可选，默认使用 PSD文件名_export.png）")
-    tile_size: int = Field(512, ge=64, le=2048, description="图片缩放分块尺寸（64-2048，默认512）")
-    verbose: bool = Field(True, description="是否显示详细信息（默认True）")
+    psd_path: str = Field(
+        ...,
+        description="PSD 套图文件路径",
+        example=r"D:\templates\template.psd"
+    )
+    image_path: str = Field(
+        ...,
+        description="素材图片路径（支持 JPG/PNG/BMP/TIFF 格式）",
+        example=r"D:\images\image.jpg"
+    )
+    export_dir: str = Field(
+        ...,
+        description="导出目录路径",
+        example=r"D:\output"
+    )
+    smart_object_name: Optional[str] = Field(
+        None,
+        description="智能对象图层名称（可选，不指定则替换第一个找到的）",
+        example="图片"
+    )
+    output_filename: Optional[str] = Field(
+        None,
+        description="导出文件名（可选，默认使用 PSD文件名_export.png）",
+        example="result.png"
+    )
+    tile_size: int = Field(
+        512,
+        ge=64,
+        le=2048,
+        description="""
+        图片缩放分块尺寸（64-2048，默认512）
+        
+        **作用**：控制图片缩放时的分块处理大小，用于降低内存占用。
+        
+        **工作原理**：
+        - 将大图片分成多个小块进行处理
+        - 每个块的大小 = tile_size x tile_size 像素
+        - 逐个处理每个块，处理完立即释放内存
+        
+        **推荐值**：
+        - 512（默认）：适合大多数情况
+        - 1024：适合中等大小图片（2000-5000像素）
+        - 2048：适合超大图片（>5000像素）
+        - 256：内存受限环境
+        
+        **性能影响**：
+        - 较小值：内存占用更低，但处理时间稍长
+        - 较大值：处理速度更快，但内存占用稍高
+        """,
+        example=512
+    )
+    verbose: bool = Field(
+        True,
+        description="""
+        是否显示详细信息（默认True）
+        
+        **作用**：控制是否显示详细的处理过程日志。
+        
+        **verbose=true**（默认）：
+        - 显示素材图信息（尺寸、格式、大小等）
+        - 显示 PSD 文件信息（尺寸、分辨率、图层等）
+        - 显示智能对象详细信息（名称、尺寸、位置等）
+        - 显示处理过程的每个步骤
+        - 显示验证信息
+        
+        **verbose=false**（静默模式）：
+        - 只显示关键信息（开始、完成、错误）
+        - 减少日志输出
+        - 适合生产环境或批量处理
+        
+        **使用建议**：
+        - 调试时：使用 true，便于排查问题
+        - 生产环境：使用 false，减少日志干扰
+        """,
+        example=True
+    )
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "psd_path": r"D:\templates\template.psd",
+                "image_path": r"D:\images\image.jpg",
+                "export_dir": r"D:\output",
+                "smart_object_name": "图片",
+                "output_filename": "result.png",
+                "tile_size": 512,
+                "verbose": True
+            }
+        }
     
     @validator('psd_path', 'image_path', 'export_dir')
     def validate_paths(cls, v):
@@ -82,6 +200,22 @@ class ProcessResponse(BaseModel):
     message: str = Field(..., description="响应消息")
     data: Optional[dict] = Field(None, description="响应数据")
     timestamp: str = Field(..., description="处理时间戳")
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "success": True,
+                "message": "处理成功",
+                "data": {
+                    "export_path": r"D:\output\result.png",
+                    "export_file": "result.png",
+                    "export_dir": r"D:\output",
+                    "file_size": 1234567,
+                    "file_size_mb": 1.18
+                },
+                "timestamp": "2024-01-01T12:00:00"
+            }
+        }
 
 
 class HealthResponse(BaseModel):
@@ -93,20 +227,46 @@ class HealthResponse(BaseModel):
 
 # ========== API 路由 ==========
 
-@app.get("/", tags=["基础"])
+@app.get(
+    "/",
+    tags=["基础"],
+    summary="服务信息",
+    description="获取服务基本信息和可用接口"
+)
 async def root():
-    """根路径"""
+    """
+    根路径 - 返回服务基本信息
+    
+    返回服务名称、版本和主要接口路径
+    """
     return {
         "service": "PSD 智能对象替换服务",
         "version": "1.0.0",
         "docs": "/docs",
-        "health": "/health"
+        "health": "/health",
+        "api": {
+            "process": "/api/v1/process",
+            "batch": "/api/v1/process/batch"
+        }
     }
 
 
-@app.get("/health", response_model=HealthResponse, tags=["基础"])
+@app.get(
+    "/health",
+    response_model=HealthResponse,
+    tags=["基础"],
+    summary="健康检查",
+    description="检查服务运行状态，用于监控和负载均衡"
+)
 async def health_check():
-    """健康检查"""
+    """
+    健康检查接口
+    
+    返回服务状态、版本和时间戳，可用于：
+    - 服务监控
+    - 负载均衡健康检查
+    - 服务可用性验证
+    """
     return HealthResponse(
         status="healthy",
         version="1.0.0",
@@ -114,20 +274,46 @@ async def health_check():
     )
 
 
-@app.post("/api/v1/process", response_model=ProcessResponse, tags=["处理"])
+@app.post(
+    "/api/v1/process",
+    response_model=ProcessResponse,
+    tags=["处理"],
+    summary="处理单个 PSD 文件",
+    description="""
+    替换 PSD 中的智能对象并导出图片。
+    
+    **处理流程**：
+    1. 打开 PSD 文件
+    2. 查找智能对象图层（如果指定了名称则查找匹配的，否则使用第一个找到的）
+    3. 打开智能对象文档
+    4. 缩放素材图片适配智能对象尺寸
+    5. 替换智能对象内容
+    6. 保存并关闭智能对象文档
+    7. 导出主文档为 PNG 图片
+    
+    **参数说明**：
+    - `psd_path`: PSD 套图文件路径（必需）
+    - `image_path`: 素材图片路径（必需，支持 JPG/PNG/BMP/TIFF）
+    - `export_dir`: 导出目录路径（必需）
+    - `smart_object_name`: 智能对象图层名称（可选，不指定则替换第一个找到的）
+    - `output_filename`: 导出文件名（可选，默认使用 `PSD文件名_export.png`）
+    - `tile_size`: 图片缩放分块尺寸（可选，64-2048，默认512，用于处理大图片）
+    - `verbose`: 是否显示详细信息（可选，默认true）
+    
+    **返回数据**：
+    - `export_path`: 导出文件的完整路径
+    - `export_file`: 导出文件名
+    - `export_dir`: 导出目录
+    - `file_size`: 文件大小（字节）
+    - `file_size_mb`: 文件大小（MB）
+    """,
+    response_description="处理结果，包含导出文件路径和相关信息"
+)
 async def process_psd(request: ProcessRequest):
     """
     处理 PSD 文件：替换智能对象并导出
     
-    - **psd_path**: PSD 套图文件路径
-    - **image_path**: 素材图片路径
-    - **export_dir**: 导出目录路径
-    - **smart_object_name**: 可选，智能对象图层名称
-    - **output_filename**: 可选，导出文件名
-    - **tile_size**: 图片缩放分块尺寸（默认512）
-    - **verbose**: 是否显示详细信息（默认True）
-    
-    返回导出的图片路径和相关信息
+    详细说明请查看上方的 description。
     """
     try:
         # 构建配置
@@ -163,22 +349,66 @@ async def process_psd(request: ProcessRequest):
         )
         
     except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=f"文件不存在: {str(e)}")
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "文件不存在",
+                "message": str(e),
+                "suggestion": "请检查文件路径是否正确，确保文件存在"
+            }
+        )
     except PermissionError as e:
-        raise HTTPException(status_code=403, detail=f"权限错误: {str(e)}")
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "权限错误",
+                "message": str(e),
+                "suggestion": "请以管理员权限运行服务，或检查文件/目录的访问权限"
+            }
+        )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"参数错误: {str(e)}")
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "参数错误",
+                "message": str(e),
+                "suggestion": "请检查请求参数是否符合要求"
+            }
+        )
     except Exception as e:
         import traceback
         error_detail = {
-            "error": str(e),
+            "error": "处理失败",
+            "message": str(e),
             "type": type(e).__name__,
-            "traceback": traceback.format_exc()
+            "traceback": traceback.format_exc() if request.verbose else None
         }
         raise HTTPException(status_code=500, detail=error_detail)
 
 
-@app.post("/api/v1/process/batch", tags=["处理"])
+@app.post(
+    "/api/v1/process/batch",
+    tags=["处理"],
+    summary="批量处理多个 PSD 文件",
+    description="""
+    批量处理多个 PSD 文件，串行执行。
+    
+    **注意事项**：
+    - 由于 Photoshop 的限制，批量处理会串行执行（一个接一个）
+    - 每个请求的处理时间取决于 PSD 文件大小和图片尺寸
+    - 建议设置较长的超时时间（如 10 分钟）
+    
+    **请求格式**：
+    传入一个数组，每个元素是一个 `ProcessRequest` 对象。
+    
+    **返回数据**：
+    - `total`: 总任务数
+    - `succeeded`: 成功数量
+    - `failed`: 失败数量
+    - `results`: 每个任务的处理结果数组
+    """,
+    response_description="批量处理结果，包含每个任务的处理状态"
+)
 async def process_psd_batch(requests: list[ProcessRequest], background_tasks: BackgroundTasks):
     """
     批量处理多个 PSD 文件

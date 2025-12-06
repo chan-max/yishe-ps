@@ -30,8 +30,8 @@ def main():
     parser.add_argument(
         "--host",
         type=str,
-        default="0.0.0.0",
-        help="服务主机地址（默认: 0.0.0.0，0.0.0.0 表示监听所有网络接口）"
+        default="localhost",
+        help="服务主机地址（默认: localhost，只监听本地回环接口，更安全）"
     )
     parser.add_argument(
         "--port",
@@ -59,7 +59,6 @@ def main():
     print("=" * 70)
     print(f"服务地址: http://{args.host}:{args.port}")
     print(f"API 文档: http://{args.host}:{args.port}/docs")
-    print(f"ReDoc 文档: http://{args.host}:{args.port}/redoc")
     print(f"健康检查: http://{args.host}:{args.port}/health")
     print(f"自动重载: {'✅ 启用' if args.reload else '❌ 禁用'}")
     print(f"工作进程: {args.workers}")
