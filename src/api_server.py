@@ -408,8 +408,20 @@ class ProcessRequest(BaseModel):
                     "smart_object_name": None,
                     "output_filename": None,
                     "tile_size": 512,
-                    "resize_mode": "contain",
-                    "custom_options": None,
+                    "resize_mode": "custom",
+                    "custom_options": {
+                        "position": {
+                            "x": 100,
+                            "y": 50,
+                            "unit": "px"
+                        },
+                        "size": {
+                            "width": 800,
+                            "height": 600,
+                            "unit": "px",
+                            "maintain_aspect_ratio": False
+                        }
+                    },
                     "verbose": True
                 },
                 {
