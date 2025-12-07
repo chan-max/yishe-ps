@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, validator, model_validator
 import uvicorn
@@ -74,7 +74,6 @@ app = FastAPI(
 - ✅ 替换 PSD 中的智能对象图层
 - ✅ 自动缩放图片适配智能对象尺寸
 - ✅ 导出处理后的图片
-- ✅ 支持批量处理
 - ✅ 详细的错误信息和日志
 
 ### 使用说明
@@ -87,7 +86,6 @@ app = FastAPI(
 
 - 建议以管理员权限运行服务，避免权限问题
 - 由于 Photoshop 限制，不支持并发处理
-- 批量处理会串行执行
     """,
     version="1.0.0",
     docs_url="/docs",  # Swagger UI 路径
@@ -645,8 +643,7 @@ async def root():
         "docs": "/docs",
         "health": "/health",
         "api": {
-            "process": "/api/v1/process",
-            "batch": "/api/v1/process/batch"
+            "process": "/api/v1/process"
         }
     }
 
@@ -801,97 +798,6 @@ async def process_psd(request: ProcessRequest):
             "traceback": traceback.format_exc() if request.verbose else None
         }
         raise HTTPException(status_code=500, detail=error_detail)
-
-
-@app.post(
-    "/api/v1/process/batch",
-    tags=["处理"],
-    summary="批量处理多个 PSD 文件",
-    description="""
-    批量处理多个 PSD 文件，串行执行。
-    
-    **注意事项**：
-    - 由于 Photoshop 的限制，批量处理会串行执行（一个接一个）
-    - 每个请求的处理时间取决于 PSD 文件大小和图片尺寸
-    - 建议设置较长的超时时间（如 10 分钟）
-    
-    **请求格式**：
-    传入一个数组，每个元素是一个 `ProcessRequest` 对象。
-    
-    **返回数据**：
-    - `total`: 总任务数
-    - `succeeded`: 成功数量
-    - `failed`: 失败数量
-    - `results`: 每个任务的处理结果数组
-    """,
-    response_description="批量处理结果，包含每个任务的处理状态"
-)
-async def process_psd_batch(requests: list[ProcessRequest], background_tasks: BackgroundTasks):
-    """
-    批量处理多个 PSD 文件
-    
-    注意：由于 Photoshop 的限制，批量处理会串行执行
-    """
-    results = []
-    
-    for i, request in enumerate(requests, 1):
-        try:
-            # 使用默认导出目录（如果未指定）
-            export_dir = request.export_dir if request.export_dir else str(DEFAULT_EXPORT_DIR)
-            
-            # 确保默认目录存在
-            default_path = Path(export_dir)
-            if not default_path.exists():
-                default_path.mkdir(parents=True, exist_ok=True)
-            
-            # 生成带时间戳的唯一文件名
-            psd_path_obj = Path(request.psd_path)
-            unique_filename = generate_unique_filename(request.output_filename, psd_path_obj)
-            
-            config = {
-                'export_dir': export_dir,
-                'smart_object_name': request.smart_object_name,
-                'output_filename': unique_filename,
-                'tile_size': request.tile_size,
-                'resize_mode': request.resize_mode,
-                'verbose': request.verbose
-            }
-            
-            # 如果使用自定义模式，添加 custom_options
-            if request.resize_mode == 'custom' and request.custom_options:
-                config['custom_options'] = request.custom_options.dict()
-            
-            export_path = process_psd_with_image(
-                psd_path=request.psd_path,
-                image_path=request.image_path,
-                config=config
-            )
-            
-            results.append({
-                'index': i,
-                'success': True,
-                'psd_path': request.psd_path,
-                'export_path': str(export_path),
-                'message': '处理成功'
-            })
-            
-        except Exception as e:
-            results.append({
-                'index': i,
-                'success': False,
-                'psd_path': request.psd_path,
-                'error': str(e),
-                'message': f'处理失败: {str(e)}'
-            })
-    
-    return {
-        'success': True,
-        'total': len(requests),
-        'succeeded': sum(1 for r in results if r['success']),
-        'failed': sum(1 for r in results if not r['success']),
-        'results': results,
-        'timestamp': datetime.now().isoformat()
-    }
 
 
 # 注意：启动服务的入口文件已移动到项目根目录的 start_api_server.py

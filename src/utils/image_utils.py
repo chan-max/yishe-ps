@@ -132,15 +132,15 @@ def resize_image_in_tiles(
         size_width = int(size_width)
         size_height = int(size_height)
         
-        # 如果保持宽高比，根据指定的基准计算另一个维度
+        # 如果保持宽高比，根据指定的基准计算另一个维度（忽略另一个输入值）
         if maintain_aspect_ratio:
             aspect_ratio = orig_width / orig_height
             if aspect_ratio_base == 'width':
-                # 以宽度为基准，高度自适应
+                # 以宽度为基准，高度自适应（完全忽略输入的 height）
                 calculated_height = int(size_width / aspect_ratio)
                 size_height = calculated_height
             elif aspect_ratio_base == 'height':
-                # 以高度为基准，宽度自适应
+                # 以高度为基准，宽度自适应（完全忽略输入的 width）
                 calculated_width = int(size_height * aspect_ratio)
                 size_width = calculated_width
             else:
