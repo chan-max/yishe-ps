@@ -18,6 +18,37 @@ import uvicorn
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+# 默认输出目录（与服务启动文件同级的 output 目录）
+DEFAULT_EXPORT_DIR = project_root / "output"
+
+
+def generate_unique_filename(original_filename: Optional[str], psd_path: Path) -> str:
+    """
+    生成带时间戳的唯一文件名，防止文件被覆盖
+    
+    Args:
+        original_filename: 原始文件名（可选，如 None 则使用 PSD 文件名）
+        psd_path: PSD 文件路径，用于生成默认文件名
+    
+    Returns:
+        带时间戳的唯一文件名
+    """
+    # 生成时间戳（格式：YYYYMMDD_HHMMSS_毫秒，确保唯一性）
+    now = datetime.now()
+    timestamp = now.strftime("%Y%m%d_%H%M%S_%f")[:-3]  # 保留毫秒的前3位（微秒转毫秒）
+    
+    if original_filename:
+        # 如果指定了文件名，在文件名和扩展名之间插入时间戳
+        # 例如：result.png -> result_20241201_123456.png
+        filename_path = Path(original_filename)
+        stem = filename_path.stem
+        suffix = filename_path.suffix or ".png"
+        return f"{stem}_{timestamp}{suffix}"
+    else:
+        # 如果未指定文件名，使用 PSD 文件名 + 时间戳
+        psd_stem = psd_path.stem
+        return f"{psd_stem}_export_{timestamp}.png"
+
 # 导入功能模块
 try:
     from src.psd_img_replace_smartobject import process_psd_with_image
@@ -88,9 +119,9 @@ class ProcessRequest(BaseModel):
         description="素材图片路径（支持 JPG/PNG/BMP/TIFF 格式）",
         example=r"D:\images\image.jpg"
     )
-    export_dir: str = Field(
-        ...,
-        description="导出目录路径",
+    export_dir: Optional[str] = Field(
+        None,
+        description="导出目录路径（可选，不指定则使用服务启动文件同级目录下的 output 目录）",
         example=r"D:\output"
     )
     smart_object_name: Optional[str] = Field(
@@ -100,7 +131,7 @@ class ProcessRequest(BaseModel):
     )
     output_filename: Optional[str] = Field(
         None,
-        description="导出文件名（可选，默认使用 PSD文件名_export.png）",
+        description="导出文件名（可选，默认使用 PSD文件名_export.png）。注意：实际文件名会自动添加时间戳以确保唯一性，防止文件被覆盖",
         example="result.png"
     )
     tile_size: int = Field(
@@ -129,6 +160,46 @@ class ProcessRequest(BaseModel):
         """,
         example=512
     )
+    resize_mode: str = Field(
+        "contain",
+        description="""
+        图片缩放模式（默认 "contain"）
+        
+        **作用**：控制当素材图片与智能对象比例不一致时的处理方式。
+        
+        **可选值**：
+        
+        - **"stretch"**：拉伸填充模式
+          - 不保持宽高比
+          - 图片会被强制拉伸到智能对象的尺寸
+          - ⚠️ **会变形**，可能导致图片看起来被压缩或拉伸
+        
+        - **"contain"**（推荐，默认）：完整显示模式
+          - 保持图片宽高比
+          - 完整显示整张图片
+          - 如果比例不匹配，留白区域使用透明背景
+          - ✅ **不会变形**，图片保持原始比例
+          - 注意：透明背景会保存为 PNG 格式
+        
+        - **"cover"**：填充覆盖模式
+          - 保持图片宽高比
+          - 填充整个智能对象区域
+          - 如果比例不匹配，会裁剪图片边缘部分
+          - ✅ **不会变形**，但可能丢失部分内容
+        
+        **使用建议**：
+        - 大多数情况：使用 "contain"（默认），保证图片不变形
+        - 需要填满区域且可以接受裁剪：使用 "cover"
+        - 明确需要变形效果：使用 "stretch"（不推荐）
+        
+        **示例场景**：
+        - 智能对象 1000x1000，素材图 800x1200（竖图）
+          - "contain": 图片完整显示，上下留白区域为透明背景
+          - "cover": 图片填满，左右会被裁剪
+          - "stretch": 图片被压缩成正方形（变形）
+        """,
+        example="contain"
+    )
     verbose: bool = Field(
         True,
         description="""
@@ -156,14 +227,15 @@ class ProcessRequest(BaseModel):
     )
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
-                "psd_path": r"D:\templates\template.psd",
-                "image_path": r"D:\images\image.jpg",
-                "export_dir": r"D:\output",
-                "smart_object_name": "图片",
+                "psd_path": r"D:\freepik\鼠标垫单个\waterproof-desk-mat-mockup-top-view.psd",
+                "image_path": r"D:\workspace\yishe-ps\examples\paint.jpg",
+                "export_dir": None,
+                "smart_object_name": None,
                 "output_filename": "result.png",
                 "tile_size": 512,
+                "resize_mode": "contain",
                 "verbose": True
             }
         }
@@ -179,6 +251,9 @@ class ProcessRequest(BaseModel):
     @validator('export_dir')
     def validate_export_dir(cls, v):
         """验证导出目录（允许不存在，会自动创建）"""
+        # 如果为 None，返回 None（将使用默认路径）
+        if v is None:
+            return None
         path = Path(v)
         # 检查是否是文件路径（不应该有扩展名）
         if path.suffix:
@@ -217,6 +292,14 @@ class ProcessRequest(BaseModel):
         if path.suffix.lower() not in valid_extensions:
             raise ValueError(f"不支持的图片格式: {v}，支持的格式: {', '.join(valid_extensions)}")
         return v
+    
+    @validator('resize_mode')
+    def validate_resize_mode(cls, v):
+        """验证缩放模式"""
+        valid_modes = {'stretch', 'contain', 'cover'}
+        if v not in valid_modes:
+            raise ValueError(f"不支持的缩放模式: {v}，支持的模式: {', '.join(valid_modes)}")
+        return v
 
 
 class ProcessResponse(BaseModel):
@@ -227,7 +310,7 @@ class ProcessResponse(BaseModel):
     timestamp: str = Field(..., description="处理时间戳")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "success": True,
                 "message": "处理成功",
@@ -319,9 +402,9 @@ async def health_check():
     **参数说明**：
     - `psd_path`: PSD 套图文件路径（必需）
     - `image_path`: 素材图片路径（必需，支持 JPG/PNG/BMP/TIFF）
-    - `export_dir`: 导出目录路径（必需）
+    - `export_dir`: 导出目录路径（可选，不指定则使用服务启动文件同级目录下的 output 目录）
     - `smart_object_name`: 智能对象图层名称（可选，不指定则替换第一个找到的）
-    - `output_filename`: 导出文件名（可选，默认使用 `PSD文件名_export.png`）
+    - `output_filename`: 导出文件名（可选，默认使用 `PSD文件名_export.png`）。注意：实际文件名会自动添加时间戳以确保唯一性，防止文件被覆盖
     - `tile_size`: 图片缩放分块尺寸（可选，64-2048，默认512，用于处理大图片）
     - `verbose`: 是否显示详细信息（可选，默认true）
     
@@ -341,12 +424,25 @@ async def process_psd(request: ProcessRequest):
     详细说明请查看上方的 description。
     """
     try:
+        # 使用默认导出目录（如果未指定）
+        export_dir = request.export_dir if request.export_dir else str(DEFAULT_EXPORT_DIR)
+        
+        # 确保默认目录存在
+        default_path = Path(export_dir)
+        if not default_path.exists():
+            default_path.mkdir(parents=True, exist_ok=True)
+        
+        # 生成带时间戳的唯一文件名，防止文件被覆盖
+        psd_path_obj = Path(request.psd_path)
+        unique_filename = generate_unique_filename(request.output_filename, psd_path_obj)
+        
         # 构建配置
         config = {
-            'export_dir': request.export_dir,
+            'export_dir': export_dir,
             'smart_object_name': request.smart_object_name,
-            'output_filename': request.output_filename,
+            'output_filename': unique_filename,
             'tile_size': request.tile_size,
+            'resize_mode': request.resize_mode,
             'verbose': request.verbose
         }
         
@@ -444,11 +540,24 @@ async def process_psd_batch(requests: list[ProcessRequest], background_tasks: Ba
     
     for i, request in enumerate(requests, 1):
         try:
+            # 使用默认导出目录（如果未指定）
+            export_dir = request.export_dir if request.export_dir else str(DEFAULT_EXPORT_DIR)
+            
+            # 确保默认目录存在
+            default_path = Path(export_dir)
+            if not default_path.exists():
+                default_path.mkdir(parents=True, exist_ok=True)
+            
+            # 生成带时间戳的唯一文件名
+            psd_path_obj = Path(request.psd_path)
+            unique_filename = generate_unique_filename(request.output_filename, psd_path_obj)
+            
             config = {
-                'export_dir': request.export_dir,
+                'export_dir': export_dir,
                 'smart_object_name': request.smart_object_name,
-                'output_filename': request.output_filename or f"batch_{i}_{Path(request.psd_path).stem}_export.png",
+                'output_filename': unique_filename,
                 'tile_size': request.tile_size,
+                'resize_mode': request.resize_mode,
                 'verbose': request.verbose
             }
             

@@ -203,7 +203,8 @@ def replace_smart_object_content(
     layer,
     image_path: Path,
     export_dir: Path,
-    tile_size: int = 512
+    tile_size: int = 512,
+    resize_mode: str = "contain"
 ) -> None:
     """
     替换智能对象图层的内容
@@ -215,6 +216,10 @@ def replace_smart_object_content(
         image_path: 新图片路径
         export_dir: 临时文件导出目录
         tile_size: 图片缩放分块尺寸
+        resize_mode: 图片缩放模式
+            - "stretch": 拉伸填充，不保持宽高比（会变形）
+            - "contain": 保持宽高比，完整显示图片（可能有留白，默认）
+            - "cover": 保持宽高比，填充目标区域（可能裁剪）
     """
     # 设置当前活动图层
     doc.activeLayer = layer
@@ -256,11 +261,41 @@ def replace_smart_object_content(
     # 准备缩放后的图片
     from PIL import Image
     with Image.open(image_path) as img:
-        if img.mode in ("RGBA", "LA", "P"):
-            img = img.convert("RGB")
-        resized_img = resize_image_in_tiles(img, (target_width, target_height), tile_size)
+        # 根据缩放模式决定是否需要保留透明通道
+        # contain 模式需要透明背景，所以保留透明通道
+        # stretch 和 cover 模式可以转换为 RGB
+        if resize_mode != "contain":
+            if img.mode in ("RGBA", "LA", "P"):
+                img = img.convert("RGB")
         
-        resized_path = export_dir / f"{image_path.stem}_resized{image_path.suffix}"
+        # 显示原始图片尺寸和比例信息
+        orig_width, orig_height = img.size
+        orig_ratio = orig_width / orig_height
+        target_ratio = target_width / target_height
+        
+        if resize_mode != "stretch" and abs(orig_ratio - target_ratio) > 0.01:
+            print(f"    📐 比例不匹配:")
+            print(f"       原始图片: {orig_width} x {orig_height} (比例 {orig_ratio:.3f})")
+            print(f"       目标尺寸: {target_width} x {target_height} (比例 {target_ratio:.3f})")
+            if resize_mode == "contain":
+                print(f"      使用 contain 模式: 保持宽高比，完整显示（留白区域透明）")
+            elif resize_mode == "cover":
+                print(f"      使用 cover 模式: 保持宽高比，填充区域（可能裁剪）")
+        
+        resized_img = resize_image_in_tiles(
+            img, 
+            (target_width, target_height), 
+            tile_size,
+            mode=resize_mode
+        )
+        
+        # contain 模式使用透明背景（RGBA），需要保存为 PNG 格式以保留透明通道
+        # 其他模式可以保持原始格式
+        if resize_mode == "contain" and resized_img.mode == "RGBA":
+            resized_path = export_dir / f"{image_path.stem}_resized.png"
+        else:
+            resized_path = export_dir / f"{image_path.stem}_resized{image_path.suffix}"
+        
         resized_img.save(
             resized_path,
             dpi=(int(smart_doc.resolution), int(smart_doc.resolution))
@@ -418,6 +453,14 @@ def replace_smart_object_content(
                     print(f"    期望主文档: {doc.name}")
             except Exception as e:
                 print(f"    ⚠️ 警告: 验证主文档时出错: {e}")
+            
+            # 清理临时 resized 文件
+            try:
+                if resized_path.exists():
+                    resized_path.unlink()
+                    print(f"    🗑️  已清理临时文件: {resized_path.name}")
+            except Exception as cleanup_error:
+                print(f"    ⚠️ 警告: 清理临时文件失败: {cleanup_error}，但不影响处理结果")
                 
         except Exception as close_error:
             close_error_msg = str(close_error)
@@ -483,7 +526,8 @@ def replace_and_export_psd(
     export_dir: Path,
     smart_object_name: Optional[str] = None,
     output_filename: Optional[str] = None,
-    tile_size: int = 512
+    tile_size: int = 512,
+    resize_mode: str = "contain"
 ) -> Path:
     """
     替换 PSD 中的智能对象并导出图片
@@ -495,6 +539,10 @@ def replace_and_export_psd(
         smart_object_name: 可选，指定要替换的智能对象名称（如果为 None 则替换第一个找到的智能对象）
         output_filename: 可选，导出文件名（如果为 None 则使用默认名称）
         tile_size: 图片缩放分块尺寸，默认 512
+        resize_mode: 图片缩放模式，默认 "contain"
+            - "stretch": 拉伸填充，不保持宽高比（会变形）
+            - "contain": 保持宽高比，完整显示图片（可能有留白）
+            - "cover": 保持宽高比，填充目标区域（可能裁剪）
     
     Returns:
         导出的图片文件路径
@@ -640,7 +688,12 @@ def replace_and_export_psd(
         print(f"目标智能对象: {target_so['name']}")
         print(f"智能对象尺寸: {target_so['width']} x {target_so['height']} 像素")
         print(f"素材图尺寸: {img_size[0]} x {img_size[1]} 像素")
-        print(f"缩放策略: 自动适配智能对象尺寸")
+        resize_mode_desc = {
+            "stretch": "拉伸填充（会变形）",
+            "contain": "保持宽高比，完整显示（可能有留白）",
+            "cover": "保持宽高比，填充区域（可能裁剪）"
+        }
+        print(f"缩放策略: {resize_mode_desc.get(resize_mode, resize_mode)}")
         print(f"分块尺寸: {tile_size} 像素")
         print("=" * 70)
         
@@ -651,7 +704,8 @@ def replace_and_export_psd(
             target_so['layer'], 
             image_path, 
             export_dir, 
-            tile_size
+            tile_size,
+            resize_mode
         )
         print(f"✅ 智能对象已替换")
         
@@ -793,6 +847,10 @@ def process_psd_with_image(
             - smart_object_name: 智能对象图层名称（可选，默认替换第一个找到的）
             - output_filename: 导出文件名（可选，默认使用 PSD 文件名_export.png）
             - tile_size: 图片缩放分块尺寸（可选，默认 512）
+            - resize_mode: 图片缩放模式（可选，默认 "contain"）
+                - "stretch": 拉伸填充，不保持宽高比（会变形）
+                - "contain": 保持宽高比，完整显示图片（可能有留白）
+                - "cover": 保持宽高比，填充目标区域（可能裁剪）
             - auto_start_photoshop: 是否自动启动 Photoshop（可选，默认 True）
             - verbose: 是否显示详细信息（可选，默认 True）
     
@@ -822,6 +880,7 @@ def process_psd_with_image(
         'smart_object_name': None,
         'output_filename': None,
         'tile_size': 512,
+        'resize_mode': 'contain',  # 默认保持宽高比，完整显示
         'auto_start_photoshop': True,
         'verbose': True
     }
@@ -852,7 +911,8 @@ def process_psd_with_image(
                 export_dir=export_dir,
                 smart_object_name=final_config['smart_object_name'],
                 output_filename=final_config['output_filename'],
-                tile_size=final_config['tile_size']
+                tile_size=final_config['tile_size'],
+                resize_mode=final_config['resize_mode']
             )
     else:
         return replace_and_export_psd(
@@ -861,7 +921,8 @@ def process_psd_with_image(
             export_dir=export_dir,
             smart_object_name=final_config['smart_object_name'],
             output_filename=final_config['output_filename'],
-            tile_size=final_config['tile_size']
+            tile_size=final_config['tile_size'],
+            resize_mode=final_config['resize_mode']
         )
 
 
