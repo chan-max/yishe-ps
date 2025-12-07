@@ -643,7 +643,7 @@ async def root():
         "docs": "/docs",
         "health": "/health",
         "api": {
-            "process": "/api/v1/process"
+            "process": "/processPsd"
         }
     }
 
@@ -672,7 +672,7 @@ async def health_check():
 
 
 @app.post(
-    "/api/v1/process",
+    "/processPsd",
     response_model=ProcessResponse,
     tags=["处理"],
     summary="处理单个 PSD 文件",
