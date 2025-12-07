@@ -61,6 +61,25 @@ except ImportError:
     spec.loader.exec_module(psd_replace)
     process_psd_with_image = psd_replace.process_psd_with_image
 
+# 导入 Photoshop 状态检测服务
+try:
+    from src.services import check_photoshop_status, analyze_psd
+except ImportError:
+    # 如果相对导入失败，尝试绝对导入
+    import importlib.util
+    service_path = Path(__file__).parent / "services" / "photoshop_status_service.py"
+    spec = importlib.util.spec_from_file_location("ps_status", service_path)
+    ps_status = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ps_status)
+    check_photoshop_status = ps_status.check_photoshop_status
+    
+    # 导入 PSD 分析服务
+    analysis_path = Path(__file__).parent / "services" / "psd_analysis_service.py"
+    spec = importlib.util.spec_from_file_location("psd_analysis", analysis_path)
+    psd_analysis = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(psd_analysis)
+    analyze_psd = psd_analysis.analyze_psd
+
 # 创建 FastAPI 应用
 app = FastAPI(
     title="PSD 智能对象替换服务",
@@ -623,6 +642,174 @@ class HealthResponse(BaseModel):
     timestamp: str = Field(..., description="检查时间")
 
 
+class PhotoshopStatusRequest(BaseModel):
+    """Photoshop 状态检测请求模型"""
+    test_connection: bool = Field(
+        False,
+        description="""
+        是否测试 Photoshop COM 连接（默认 False）
+        
+        **作用**：控制是否进行实际的 COM 连接测试。
+        
+        **test_connection=false**（默认，快速模式）：
+        - 只检查进程是否运行
+        - 检查 COM 接口是否注册
+        - 不进行实际连接测试
+        - ⚡ **速度快**，适合频繁检查
+        
+        **test_connection=true**（完整模式）：
+        - 执行所有基础检查
+        - 额外进行实际的 COM 连接测试
+        - 验证 Photoshop 是否真正可用
+        - ⏱️ **速度较慢**（需要几秒），但更准确
+        - 适合在开始处理前确认 PS 完全可用
+        
+        **使用建议**：
+        - 日常监控：使用 false（快速）
+        - 处理前检查：使用 true（确保可用）
+        """,
+        example=False
+    )
+
+
+class PhotoshopStatusResponse(BaseModel):
+    """Photoshop 状态检测响应模型"""
+    is_running: bool = Field(..., description="Photoshop 进程是否运行")
+    is_available: bool = Field(..., description="Photoshop 是否可用（运行且可连接）")
+    executable_path: Optional[str] = Field(None, description="Photoshop 可执行文件路径")
+    com_registered: bool = Field(..., description="COM 接口是否注册")
+    connection_test: Optional[dict] = Field(None, description="连接测试结果（如果 test_connection=true）")
+    diagnostics: str = Field(..., description="诊断信息")
+    timestamp: str = Field(..., description="检测时间戳")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "is_running": True,
+                "is_available": True,
+                "executable_path": r"C:\Program Files\Adobe\Adobe Photoshop 2024\Photoshop.exe",
+                "com_registered": True,
+                "connection_test": {
+                    "success": True,
+                    "error": None,
+                    "version": "25.0.0"
+                },
+                "diagnostics": "✅ Photoshop 进程正在运行\n✅ Photoshop COM 接口已注册\n✅ 找到 Photoshop 可执行文件: C:\\Program Files\\Adobe\\Adobe Photoshop 2024\\Photoshop.exe",
+                "timestamp": "2024-01-01T12:00:00"
+            }
+        }
+
+
+class SmartObjectInfo(BaseModel):
+    """智能对象信息模型"""
+    name: str = Field(..., description="智能对象名称")
+    path: str = Field(..., description="智能对象完整路径（包含父图层）")
+    visible: bool = Field(..., description="是否可见")
+    opacity: float = Field(..., description="不透明度（0.0-1.0）")
+    blend_mode: str = Field(..., description="混合模式")
+    position: dict = Field(..., description="位置信息（x, y, left, top, right, bottom）")
+    size: dict = Field(..., description="尺寸信息（width, height, aspect_ratio）")
+    bounds: Optional[dict] = Field(None, description="边界框信息")
+    smart_object: Optional[dict] = Field(None, description="智能对象特定信息")
+    transform: Optional[dict] = Field(None, description="变换矩阵信息")
+    has_effects: bool = Field(..., description="是否有图层效果")
+    effects: Optional[list] = Field(None, description="图层效果列表")
+    has_mask: bool = Field(..., description="是否有图层蒙版")
+    mask: Optional[dict] = Field(None, description="图层蒙版信息")
+
+
+class PSDAnalysisRequest(BaseModel):
+    """PSD 分析请求模型"""
+    psd_path: str = Field(
+        ...,
+        description="PSD 文件路径",
+        example=r"D:\templates\template.psd"
+    )
+    
+    @validator('psd_path')
+    def validate_psd_path(cls, v):
+        """验证 PSD 文件路径"""
+        path = Path(v)
+        if not path.exists():
+            raise ValueError(f"PSD 文件不存在: {v}")
+        if path.suffix.lower() != '.psd':
+            raise ValueError(f"文件必须是 PSD 格式: {v}")
+        return str(path.absolute())
+
+
+class PSDAnalysisResponse(BaseModel):
+    """PSD 分析响应模型"""
+    file_info: dict = Field(..., description="文件基本信息")
+    document_info: dict = Field(..., description="文档信息（尺寸、分辨率等）")
+    smart_objects: list = Field(..., description="智能对象列表（详细信息）")
+    statistics: dict = Field(..., description="统计信息")
+    timestamp: str = Field(..., description="分析时间戳")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "file_info": {
+                    "file_path": r"D:\templates\template.psd",
+                    "file_name": "template.psd",
+                    "file_size": 12345678,
+                    "file_size_mb": 11.78
+                },
+                "document_info": {
+                    "width": 1920,
+                    "height": 1080,
+                    "color_mode": "RGB",
+                    "depth": 8,
+                    "channels": 3,
+                    "resolution": {
+                        "horizontal": 72.0,
+                        "vertical": 72.0,
+                        "unit": "pixels/inch"
+                    }
+                },
+                "smart_objects": [
+                    {
+                        "name": "图片",
+                        "path": "图片",
+                        "visible": True,
+                        "opacity": 1.0,
+                        "blend_mode": "normal",
+                        "position": {
+                            "x": 100,
+                            "y": 50,
+                            "left": 100,
+                            "top": 50,
+                            "right": 900,
+                            "bottom": 650
+                        },
+                        "size": {
+                            "width": 800,
+                            "height": 600,
+                            "aspect_ratio": 1.3333
+                        },
+                        "bounds": {
+                            "x1": 100,
+                            "y1": 50,
+                            "x2": 900,
+                            "y2": 650
+                        },
+                        "smart_object": {
+                            "unique_id": "12345",
+                            "file_type": "embedded"
+                        },
+                        "has_effects": False,
+                        "has_mask": False
+                    }
+                ],
+                "statistics": {
+                    "total_smart_objects": 1,
+                    "total_layers": 5,
+                    "has_smart_objects": True
+                },
+                "timestamp": "2024-01-01T12:00:00"
+            }
+        }
+
+
 # ========== API 路由 ==========
 
 @app.get(
@@ -643,7 +830,9 @@ async def root():
         "docs": "/docs",
         "health": "/health",
         "api": {
-            "process": "/processPsd"
+            "process": "/processPsd",
+            "photoshopStatus": "/photoshopStatus",
+            "analyzePsd": "/analyzePsd"
         }
     }
 
@@ -796,6 +985,175 @@ async def process_psd(request: ProcessRequest):
             "message": str(e),
             "type": type(e).__name__,
             "traceback": traceback.format_exc() if request.verbose else None
+        }
+        raise HTTPException(status_code=500, detail=error_detail)
+
+
+@app.get(
+    "/photoshopStatus",
+    response_model=PhotoshopStatusResponse,
+    tags=["Photoshop"],
+    summary="检测 Photoshop 状态",
+    description="""
+    检测 Photoshop 是否启动、可用，以及连接状态。
+    
+    **功能说明**：
+    - 检查 Photoshop 进程是否运行
+    - 检查 Photoshop 可执行文件是否存在
+    - 检查 COM 接口是否注册
+    - 可选：测试实际的 COM 连接（需要 test_connection=true）
+    
+    **使用场景**：
+    - 在处理 PSD 文件前，先检查 Photoshop 是否可用
+    - 监控 Photoshop 运行状态
+    - 诊断 Photoshop 连接问题
+    
+    **参数说明**：
+    - `test_connection`（可选，默认 false）：
+      - false：快速检查，只检查进程和注册表
+      - true：完整检查，包括实际连接测试（较慢但更准确）
+    
+    **返回信息**：
+    - `is_running`: Photoshop 进程是否运行
+    - `is_available`: Photoshop 是否可用（运行且可连接）
+    - `executable_path`: Photoshop 可执行文件路径
+    - `com_registered`: COM 接口是否注册
+    - `connection_test`: 连接测试结果（如果 test_connection=true）
+    - `diagnostics`: 详细的诊断信息
+    
+    **使用建议**：
+    - 日常监控：使用默认参数（快速检查）
+    - 处理前确认：使用 `?test_connection=true`（确保完全可用）
+    """,
+    response_description="Photoshop 状态信息，包含运行状态、可用性和诊断信息"
+)
+async def get_photoshop_status(test_connection: bool = False):
+    """
+    检测 Photoshop 状态和可用性
+    
+    详细说明请查看上方的 description。
+    """
+    try:
+        # 调用状态检测服务
+        status_result = check_photoshop_status(test_connection=test_connection)
+        
+        return PhotoshopStatusResponse(
+            is_running=status_result["is_running"],
+            is_available=status_result["is_available"],
+            executable_path=status_result.get("executable_path"),
+            com_registered=status_result["com_registered"],
+            connection_test=status_result.get("connection_test"),
+            diagnostics=status_result["diagnostics"],
+            timestamp=status_result["timestamp"]
+        )
+        
+    except Exception as e:
+        import traceback
+        error_detail = {
+            "error": "检测 Photoshop 状态失败",
+            "message": str(e),
+            "type": type(e).__name__,
+            "traceback": traceback.format_exc()
+        }
+        raise HTTPException(status_code=500, detail=error_detail)
+
+
+@app.post(
+    "/analyzePsd",
+    response_model=PSDAnalysisResponse,
+    tags=["PSD 分析"],
+    summary="分析 PSD 文件",
+    description="""
+    分析 PSD 文件，提取整体信息和智能对象详细信息。
+    
+    **功能说明**：
+    - 提取 PSD 文件的整体尺寸、分辨率、颜色模式等信息
+    - 查找并分析所有智能对象图层
+    - 提取每个智能对象的详细信息：
+      - 名称和路径
+      - 位置（x, y, left, top, right, bottom）
+      - 尺寸（width, height, aspect_ratio）
+      - 边界框信息
+      - 智能对象特定信息（unique_id, file_type等）
+      - 变换矩阵信息
+      - 图层效果和蒙版信息
+    
+    **使用场景**：
+    - 在处理 PSD 文件前，先了解文件结构和智能对象信息
+    - 获取智能对象的精确位置和尺寸，用于后续处理
+    - 验证 PSD 文件是否包含智能对象
+    - 分析 PSD 文件结构
+    
+    **技术说明**：
+    - 使用 `psd-tools` 库进行解析（不需要 Photoshop 运行）
+    - 跨平台支持（Windows、Mac、Linux）
+    - 快速解析，无需启动 Photoshop
+    
+    **返回信息**：
+    - `file_info`: 文件基本信息（路径、名称、大小）
+    - `document_info`: 文档信息（宽度、高度、分辨率、颜色模式等）
+    - `smart_objects`: 智能对象列表，每个包含详细信息
+    - `statistics`: 统计信息（智能对象数量、图层总数等）
+    
+    **注意事项**：
+    - 此接口不需要 Photoshop 运行
+    - 如果 PSD 文件损坏或格式不正确，会返回错误
+    - 某些复杂的智能对象信息可能无法完全提取
+    """,
+    response_description="PSD 文件分析结果，包含文档信息和智能对象详细信息"
+)
+async def analyze_psd_file(request: PSDAnalysisRequest):
+    """
+    分析 PSD 文件
+    
+    详细说明请查看上方的 description。
+    """
+    try:
+        # 调用分析服务
+        analysis_result = analyze_psd(request.psd_path)
+        
+        return PSDAnalysisResponse(
+            file_info=analysis_result["file_info"],
+            document_info=analysis_result["document_info"],
+            smart_objects=analysis_result["smart_objects"],
+            statistics=analysis_result["statistics"],
+            timestamp=analysis_result["timestamp"]
+        )
+        
+    except FileNotFoundError as e:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "文件不存在",
+                "message": str(e),
+                "suggestion": "请检查文件路径是否正确，确保文件存在"
+            }
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "参数错误",
+                "message": str(e),
+                "suggestion": "请确保文件是 PSD 格式"
+            }
+        )
+    except ImportError as e:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "依赖库未安装",
+                "message": str(e),
+                "suggestion": "请运行: pip install psd-tools"
+            }
+        )
+    except Exception as e:
+        import traceback
+        error_detail = {
+            "error": "分析 PSD 文件失败",
+            "message": str(e),
+            "type": type(e).__name__,
+            "traceback": traceback.format_exc()
         }
         raise HTTPException(status_code=500, detail=error_detail)
 
