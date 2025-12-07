@@ -11,7 +11,7 @@ from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, validator, model_validator
 import uvicorn
 
 # 添加项目路径
@@ -107,6 +107,90 @@ app = FastAPI(
 
 # ========== 请求/响应模型 ==========
 
+class Position(BaseModel):
+    """位置配置"""
+    x: float = Field(..., ge=0, description="x 坐标（相对于智能对象左上角）", example=100)
+    y: float = Field(..., ge=0, description="y 坐标（相对于智能对象左上角）", example=50)
+    unit: str = Field(
+        "px",
+        description="单位：'px'（像素）或 '%'（百分比）",
+        example="px"
+    )
+    
+    @validator('unit')
+    def validate_unit(cls, v):
+        """验证单位"""
+        if v not in {'px', '%'}:
+            raise ValueError(f"单位必须是 'px' 或 '%'，当前值: {v}")
+        return v
+    
+    @validator('x', 'y')
+    def validate_percentage_range(cls, v, values):
+        """验证百分比范围"""
+        if 'unit' in values and values['unit'] == '%' and (v < 0 or v > 100):
+            raise ValueError(f"百分比值必须在 0-100 之间，当前值: {v}")
+        return v
+
+
+class Size(BaseModel):
+    """尺寸配置"""
+    width: float = Field(..., gt=0, description="宽度", example=800)
+    height: float = Field(..., gt=0, description="高度", example=600)
+    unit: str = Field(
+        "px",
+        description="单位：'px'（像素）或 '%'（百分比）",
+        example="px"
+    )
+    maintain_aspect_ratio: bool = Field(
+        False,
+        description="是否保持宽高比（如果为 True，需要指定 aspect_ratio_base）",
+        example=False
+    )
+    aspect_ratio_base: Optional[str] = Field(
+        None,
+        description="""
+        宽高比基准（仅当 maintain_aspect_ratio=true 时使用）
+        
+        - "width"：以宽度为基准，高度自适应。如果计算出的高度超出智能对象，会裁剪超出部分
+        - "height"：以高度为基准，宽度自适应。如果计算出的宽度超出智能对象，会裁剪超出部分
+        
+        当 maintain_aspect_ratio=false 时，此参数会被忽略
+        """,
+        example="width"
+    )
+    
+    @validator('unit')
+    def validate_unit(cls, v):
+        """验证单位"""
+        if v not in {'px', '%'}:
+            raise ValueError(f"单位必须是 'px' 或 '%'，当前值: {v}")
+        return v
+    
+    @validator('width', 'height')
+    def validate_percentage_range(cls, v, values):
+        """验证百分比范围"""
+        if 'unit' in values and values['unit'] == '%' and (v < 0 or v > 100):
+            raise ValueError(f"百分比值必须在 0-100 之间，当前值: {v}")
+        return v
+    
+    @validator('aspect_ratio_base')
+    def validate_aspect_ratio_base(cls, v, values):
+        """验证宽高比基准"""
+        maintain_aspect_ratio = values.get('maintain_aspect_ratio', False)
+        if maintain_aspect_ratio:
+            if v is None:
+                raise ValueError("当 maintain_aspect_ratio=true 时，aspect_ratio_base 必须提供（'width' 或 'height'）")
+            if v not in {'width', 'height'}:
+                raise ValueError(f"aspect_ratio_base 必须是 'width' 或 'height'，当前值: {v}")
+        return v
+
+
+class CustomOptions(BaseModel):
+    """自定义模式配置"""
+    position: Position = Field(..., description="位置配置")
+    size: Size = Field(..., description="尺寸配置")
+
+
 class ProcessRequest(BaseModel):
     """处理请求模型"""
     psd_path: str = Field(
@@ -187,18 +271,95 @@ class ProcessRequest(BaseModel):
           - 如果比例不匹配，会裁剪图片边缘部分
           - ✅ **不会变形**，但可能丢失部分内容
         
+        - **"custom"**：自定义模式
+          - 精确控制素材图在智能对象中的位置和尺寸
+          - 支持像素（px）和百分比（%）单位
+          - 可选择是否保持宽高比
+          - 需要提供 `custom_options` 参数
+          - 详见 `custom_options` 字段说明
+        
         **使用建议**：
         - 大多数情况：使用 "contain"（默认），保证图片不变形
         - 需要填满区域且可以接受裁剪：使用 "cover"
         - 明确需要变形效果：使用 "stretch"（不推荐）
+        - 需要精确控制位置和尺寸：使用 "custom"
         
         **示例场景**：
         - 智能对象 1000x1000，素材图 800x1200（竖图）
           - "contain": 图片完整显示，上下留白区域为透明背景
           - "cover": 图片填满，左右会被裁剪
           - "stretch": 图片被压缩成正方形（变形）
+          - "custom": 根据 custom_options 精确控制位置和尺寸
         """,
         example="contain"
+    )
+    custom_options: Optional[CustomOptions] = Field(
+        None,
+        description="""
+        自定义模式配置（仅当 resize_mode="custom" 时必需）
+        
+        **使用说明**：
+        - 当 `resize_mode="custom"` 时，此参数必须提供
+        - 当 `resize_mode` 为其他值时，此参数会被忽略
+        
+        **配置项**：
+        
+        - **position**：位置配置
+          - `x`: x 坐标（相对于智能对象左上角）
+          - `y`: y 坐标（相对于智能对象左上角）
+          - `unit`: 单位，"px"（像素）或 "%"（百分比），默认 "px"
+        
+        - **size**：尺寸配置
+          - `width`: 宽度
+          - `height`: 高度
+          - `unit`: 单位，"px"（像素）或 "%"（百分比），默认 "px"
+          - `maintain_aspect_ratio`: 是否保持宽高比，默认 false
+          - `aspect_ratio_base`: 宽高比基准（仅当 maintain_aspect_ratio=true 时必需）
+            - "width"：以宽度为基准，高度自适应（如果超出智能对象会裁剪）
+            - "height"：以高度为基准，宽度自适应（如果超出智能对象会裁剪）
+        
+        **示例**：
+        ```json
+        {
+          "resize_mode": "custom",
+          "custom_options": {
+            "position": {
+              "x": 100,
+              "y": 50,
+              "unit": "px"
+            },
+            "size": {
+              "width": 800,
+              "height": 600,
+              "unit": "px",
+              "maintain_aspect_ratio": false
+            }
+          }
+        }
+        ```
+        
+        **保持宽高比示例**：
+        ```json
+        {
+          "resize_mode": "custom",
+          "custom_options": {
+            "position": {
+              "x": 0,
+              "y": 0,
+              "unit": "px"
+            },
+            "size": {
+              "width": 800,
+              "height": 600,
+              "unit": "px",
+              "maintain_aspect_ratio": true,
+              "aspect_ratio_base": "width"
+            }
+          }
+        }
+        ```
+        """,
+        example=None
     )
     verbose: bool = Field(
         True,
@@ -236,8 +397,117 @@ class ProcessRequest(BaseModel):
                 "output_filename": "result.png",
                 "tile_size": 512,
                 "resize_mode": "contain",
+                "custom_options": None,
                 "verbose": True
-            }
+            },
+            "examples": [
+                {
+                    "psd_path": r"D:\freepik\鼠标垫单个\waterproof-desk-mat-mockup-top-view.psd",
+                    "image_path": r"D:\workspace\yishe-ps\examples\paint.jpg",
+                    "export_dir": None,
+                    "smart_object_name": None,
+                    "output_filename": None,
+                    "tile_size": 512,
+                    "resize_mode": "contain",
+                    "custom_options": None,
+                    "verbose": True
+                },
+                {
+                    "psd_path": r"D:\freepik\鼠标垫单个\waterproof-desk-mat-mockup-top-view.psd",
+                    "image_path": r"D:\workspace\yishe-ps\examples\paint.jpg",
+                    "export_dir": None,
+                    "smart_object_name": None,
+                    "output_filename": None,
+                    "tile_size": 512,
+                    "resize_mode": "custom",
+                    "custom_options": {
+                        "position": {
+                            "x": 100,
+                            "y": 50,
+                            "unit": "px"
+                        },
+                        "size": {
+                            "width": 800,
+                            "height": 600,
+                            "unit": "px",
+                            "maintain_aspect_ratio": False
+                        }
+                    },
+                    "verbose": True
+                },
+                {
+                    "psd_path": r"D:\freepik\鼠标垫单个\waterproof-desk-mat-mockup-top-view.psd",
+                    "image_path": r"D:\workspace\yishe-ps\examples\paint.jpg",
+                    "export_dir": None,
+                    "smart_object_name": None,
+                    "output_filename": None,
+                    "tile_size": 512,
+                    "resize_mode": "custom",
+                    "custom_options": {
+                        "position": {
+                            "x": 10,
+                            "y": 10,
+                            "unit": "%"
+                        },
+                        "size": {
+                            "width": 80,
+                            "height": 80,
+                            "unit": "%",
+                            "maintain_aspect_ratio": True,
+                            "aspect_ratio_base": "width"
+                        }
+                    },
+                    "verbose": True
+                },
+                {
+                    "psd_path": r"D:\freepik\鼠标垫单个\waterproof-desk-mat-mockup-top-view.psd",
+                    "image_path": r"D:\workspace\yishe-ps\examples\paint.jpg",
+                    "export_dir": None,
+                    "smart_object_name": None,
+                    "output_filename": None,
+                    "tile_size": 512,
+                    "resize_mode": "custom",
+                    "custom_options": {
+                        "position": {
+                            "x": 0,
+                            "y": 0,
+                            "unit": "px"
+                        },
+                        "size": {
+                            "width": 800,
+                            "height": 600,
+                            "unit": "px",
+                            "maintain_aspect_ratio": True,
+                            "aspect_ratio_base": "width"
+                        }
+                    },
+                    "verbose": True
+                },
+                {
+                    "psd_path": r"D:\freepik\鼠标垫单个\waterproof-desk-mat-mockup-top-view.psd",
+                    "image_path": r"D:\workspace\yishe-ps\examples\paint.jpg",
+                    "export_dir": None,
+                    "smart_object_name": None,
+                    "output_filename": None,
+                    "tile_size": 512,
+                    "resize_mode": "custom",
+                    "custom_options": {
+                        "position": {
+                            "x": 0,
+                            "y": 0,
+                            "unit": "px"
+                        },
+                        "size": {
+                            "width": 800,
+                            "height": 600,
+                            "unit": "px",
+                            "maintain_aspect_ratio": True,
+                            "aspect_ratio_base": "height"
+                        }
+                    },
+                    "verbose": True
+                }
+            ]
         }
     
     @validator('psd_path', 'image_path')
@@ -296,10 +566,20 @@ class ProcessRequest(BaseModel):
     @validator('resize_mode')
     def validate_resize_mode(cls, v):
         """验证缩放模式"""
-        valid_modes = {'stretch', 'contain', 'cover'}
+        valid_modes = {'stretch', 'contain', 'cover', 'custom'}
         if v not in valid_modes:
             raise ValueError(f"不支持的缩放模式: {v}，支持的模式: {', '.join(valid_modes)}")
         return v
+    
+    @model_validator(mode='after')
+    def validate_custom_options(self):
+        """验证自定义模式配置"""
+        if self.resize_mode == 'custom':
+            if self.custom_options is None:
+                raise ValueError("当 resize_mode='custom' 时，custom_options 必须提供")
+        # 非 custom 模式时，custom_options 会被忽略，允许为 None 或提供
+        
+        return self
 
 
 class ProcessResponse(BaseModel):
@@ -446,6 +726,10 @@ async def process_psd(request: ProcessRequest):
             'verbose': request.verbose
         }
         
+        # 如果使用自定义模式，添加 custom_options
+        if request.resize_mode == 'custom' and request.custom_options:
+            config['custom_options'] = request.custom_options.dict()
+        
         # 调用处理函数
         export_path = process_psd_with_image(
             psd_path=request.psd_path,
@@ -560,6 +844,10 @@ async def process_psd_batch(requests: list[ProcessRequest], background_tasks: Ba
                 'resize_mode': request.resize_mode,
                 'verbose': request.verbose
             }
+            
+            # 如果使用自定义模式，添加 custom_options
+            if request.resize_mode == 'custom' and request.custom_options:
+                config['custom_options'] = request.custom_options.dict()
             
             export_path = process_psd_with_image(
                 psd_path=request.psd_path,

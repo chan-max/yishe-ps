@@ -204,7 +204,8 @@ def replace_smart_object_content(
     image_path: Path,
     export_dir: Path,
     tile_size: int = 512,
-    resize_mode: str = "contain"
+    resize_mode: str = "contain",
+    custom_options: Optional[dict] = None
 ) -> None:
     """
     替换智能对象图层的内容
@@ -220,6 +221,8 @@ def replace_smart_object_content(
             - "stretch": 拉伸填充，不保持宽高比（会变形）
             - "contain": 保持宽高比，完整显示图片（可能有留白，默认）
             - "cover": 保持宽高比，填充目标区域（可能裁剪）
+            - "custom": 自定义模式，精确控制位置和尺寸（需要 custom_options）
+        custom_options: 自定义模式配置（仅当 resize_mode="custom" 时使用）
     """
     # 设置当前活动图层
     doc.activeLayer = layer
@@ -262,9 +265,9 @@ def replace_smart_object_content(
     from PIL import Image
     with Image.open(image_path) as img:
         # 根据缩放模式决定是否需要保留透明通道
-        # contain 模式需要透明背景，所以保留透明通道
+        # contain 和 custom 模式需要透明背景，所以保留透明通道
         # stretch 和 cover 模式可以转换为 RGB
-        if resize_mode != "contain":
+        if resize_mode not in ("contain", "custom"):
             if img.mode in ("RGBA", "LA", "P"):
                 img = img.convert("RGB")
         
@@ -273,7 +276,16 @@ def replace_smart_object_content(
         orig_ratio = orig_width / orig_height
         target_ratio = target_width / target_height
         
-        if resize_mode != "stretch" and abs(orig_ratio - target_ratio) > 0.01:
+        if resize_mode == "custom" and custom_options:
+            # 自定义模式的日志
+            position = custom_options.get('position', {})
+            size = custom_options.get('size', {})
+            print(f"    🎯 自定义模式配置:")
+            print(f"       位置: ({position.get('x', 0)}{position.get('unit', 'px')}, {position.get('y', 0)}{position.get('unit', 'px')})")
+            print(f"       尺寸: {size.get('width', 0)}{size.get('unit', 'px')} x {size.get('height', 0)}{size.get('unit', 'px')}")
+            if size.get('maintain_aspect_ratio', False):
+                print(f"       保持宽高比: 是")
+        elif resize_mode != "stretch" and abs(orig_ratio - target_ratio) > 0.01:
             print(f"    📐 比例不匹配:")
             print(f"       原始图片: {orig_width} x {orig_height} (比例 {orig_ratio:.3f})")
             print(f"       目标尺寸: {target_width} x {target_height} (比例 {target_ratio:.3f})")
@@ -286,12 +298,13 @@ def replace_smart_object_content(
             img, 
             (target_width, target_height), 
             tile_size,
-            mode=resize_mode
+            mode=resize_mode,
+            custom_options=custom_options
         )
         
-        # contain 模式使用透明背景（RGBA），需要保存为 PNG 格式以保留透明通道
+        # contain 和 custom 模式使用透明背景（RGBA），需要保存为 PNG 格式以保留透明通道
         # 其他模式可以保持原始格式
-        if resize_mode == "contain" and resized_img.mode == "RGBA":
+        if resize_mode in ("contain", "custom") and resized_img.mode == "RGBA":
             resized_path = export_dir / f"{image_path.stem}_resized.png"
         else:
             resized_path = export_dir / f"{image_path.stem}_resized{image_path.suffix}"
@@ -527,7 +540,8 @@ def replace_and_export_psd(
     smart_object_name: Optional[str] = None,
     output_filename: Optional[str] = None,
     tile_size: int = 512,
-    resize_mode: str = "contain"
+    resize_mode: str = "contain",
+    custom_options: Optional[dict] = None
 ) -> Path:
     """
     替换 PSD 中的智能对象并导出图片
@@ -543,6 +557,8 @@ def replace_and_export_psd(
             - "stretch": 拉伸填充，不保持宽高比（会变形）
             - "contain": 保持宽高比，完整显示图片（可能有留白）
             - "cover": 保持宽高比，填充目标区域（可能裁剪）
+            - "custom": 自定义模式，精确控制位置和尺寸（需要 custom_options）
+        custom_options: 自定义模式配置（仅当 resize_mode="custom" 时使用）
     
     Returns:
         导出的图片文件路径
@@ -691,7 +707,8 @@ def replace_and_export_psd(
         resize_mode_desc = {
             "stretch": "拉伸填充（会变形）",
             "contain": "保持宽高比，完整显示（可能有留白）",
-            "cover": "保持宽高比，填充区域（可能裁剪）"
+            "cover": "保持宽高比，填充区域（可能裁剪）",
+            "custom": "自定义模式（精确控制位置和尺寸）"
         }
         print(f"缩放策略: {resize_mode_desc.get(resize_mode, resize_mode)}")
         print(f"分块尺寸: {tile_size} 像素")
@@ -705,7 +722,8 @@ def replace_and_export_psd(
             image_path, 
             export_dir, 
             tile_size,
-            resize_mode
+            resize_mode,
+            custom_options
         )
         print(f"✅ 智能对象已替换")
         
@@ -851,6 +869,8 @@ def process_psd_with_image(
                 - "stretch": 拉伸填充，不保持宽高比（会变形）
                 - "contain": 保持宽高比，完整显示图片（可能有留白）
                 - "cover": 保持宽高比，填充目标区域（可能裁剪）
+                - "custom": 自定义模式，精确控制位置和尺寸（需要 custom_options）
+            - custom_options: 自定义模式配置（仅当 resize_mode="custom" 时使用）
             - auto_start_photoshop: 是否自动启动 Photoshop（可选，默认 True）
             - verbose: 是否显示详细信息（可选，默认 True）
     
@@ -881,6 +901,7 @@ def process_psd_with_image(
         'output_filename': None,
         'tile_size': 512,
         'resize_mode': 'contain',  # 默认保持宽高比，完整显示
+        'custom_options': None,  # 自定义模式配置
         'auto_start_photoshop': True,
         'verbose': True
     }
@@ -912,7 +933,8 @@ def process_psd_with_image(
                 smart_object_name=final_config['smart_object_name'],
                 output_filename=final_config['output_filename'],
                 tile_size=final_config['tile_size'],
-                resize_mode=final_config['resize_mode']
+                resize_mode=final_config['resize_mode'],
+                custom_options=final_config.get('custom_options')
             )
     else:
         return replace_and_export_psd(
@@ -922,7 +944,8 @@ def process_psd_with_image(
             smart_object_name=final_config['smart_object_name'],
             output_filename=final_config['output_filename'],
             tile_size=final_config['tile_size'],
-            resize_mode=final_config['resize_mode']
+            resize_mode=final_config['resize_mode'],
+            custom_options=final_config.get('custom_options')
         )
 
 
