@@ -687,22 +687,15 @@ def replace_and_export_psd(
             
             if smart_object_name and so['name'] == smart_object_name:
                 print(f"      ⭐ 已指定此智能对象")
-            elif i == 1 and smart_object_name is None:
-                print(f"      ⭐ 将替换此智能对象（第一个找到的）")
+            elif smart_object_name is None:
+                print(f"      ⭐ 将处理此智能对象")
         print("=" * 70)
-        
-        # 替换智能对象（如果指定了名称则替换匹配的，否则替换第一个）
-        target_so = smart_objects[0] if smart_object_name is None else next(
-            (so for so in smart_objects if so['name'] == smart_object_name), 
-            smart_objects[0]
-        )
         
         # ========== 打印替换信息 ==========
         print("\n" + "=" * 70)
         print("🔄 开始处理")
         print("=" * 70)
-        print(f"目标智能对象: {target_so['name']}")
-        print(f"智能对象尺寸: {target_so['width']} x {target_so['height']} 像素")
+        print(f"将处理 {len(smart_objects)} 个智能对象")
         print(f"素材图尺寸: {img_size[0]} x {img_size[1]} 像素")
         resize_mode_desc = {
             "stretch": "拉伸填充（会变形）",
@@ -714,18 +707,43 @@ def replace_and_export_psd(
         print(f"分块尺寸: {tile_size} 像素")
         print("=" * 70)
         
-        print(f"\n⏳ 正在替换智能对象: {target_so['name']}...")
-        replace_smart_object_content(
-            session,
-            doc,
-            target_so['layer'], 
-            image_path, 
-            export_dir, 
-            tile_size,
-            resize_mode,
-            custom_options
-        )
-        print(f"✅ 智能对象已替换")
+        # 处理所有智能对象
+        processed_count = 0
+        for i, so in enumerate(smart_objects, 1):
+            print(f"\n⏳ [{i}/{len(smart_objects)}] 正在替换智能对象: {so['name']}...")
+            try:
+                replace_smart_object_content(
+                    session,
+                    doc,
+                    so['layer'], 
+                    image_path, 
+                    export_dir, 
+                    tile_size,
+                    resize_mode,
+                    custom_options
+                )
+                print(f"✅ [{i}/{len(smart_objects)}] 智能对象 '{so['name']}' 已替换")
+                processed_count += 1
+                
+                # 确保回到主文档（每个替换操作后）
+                try:
+                    import time
+                    time.sleep(0.3)
+                    current_active = session.active_document
+                    if current_active != doc:
+                        doc.activeLayer = so['layer']
+                        print(f"    ✅ 已确保回到主文档")
+                except Exception as e:
+                    print(f"    ⚠️ 警告: 检查主文档时出错: {e}")
+                    
+            except Exception as e:
+                print(f"❌ [{i}/{len(smart_objects)}] 处理智能对象 '{so['name']}' 时出错: {e}")
+                import traceback
+                traceback.print_exc()
+                # 继续处理下一个智能对象
+                continue
+        
+        print(f"\n✅ 处理完成: 成功处理 {processed_count}/{len(smart_objects)} 个智能对象")
         
         # 确保活动文档是主文档（而不是智能对象文档）
         try:
@@ -741,8 +759,10 @@ def replace_and_export_psd(
                     # 尝试激活主文档
                     # 注意：在 photoshop-python-api 中，关闭智能对象后应该自动回到主文档
                     # 如果不行，可能需要其他方法
-                    doc.activeLayer = target_so['layer']  # 重新激活目标图层
-                    print(f"    ✅ 已激活主文档和目标图层")
+                    # 使用第一个智能对象图层来激活主文档
+                    if smart_objects:
+                        doc.activeLayer = smart_objects[0]['layer']
+                        print(f"    ✅ 已激活主文档和目标图层")
                 except Exception as e:
                     print(f"    ⚠️ 警告: 切换文档时出错: {e}")
             else:
