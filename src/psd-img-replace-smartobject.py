@@ -88,13 +88,137 @@ def check_photoshop_permissions() -> tuple[bool, str]:
         return False, f"检查 Photoshop 权限时出错: {e}"
 
 
-def find_smart_object_layers(doc, layer_name: Optional[str] = None) -> List:
+def debug_print_all_layers(doc, max_depth=10, current_depth=0, parent_path=""):
+    """
+    调试函数：打印所有图层信息，帮助排查问题
+    
+    Args:
+        doc: Photoshop 文档对象
+        max_depth: 最大递归深度
+        current_depth: 当前深度
+        parent_path: 父路径
+    """
+    if current_depth >= max_depth:
+        return
+    
+    indent = "  " * current_depth
+    
+    def print_layer_info(layer, depth, path_prefix=""):
+        """递归打印图层信息"""
+        indent_str = "  " * depth
+        try:
+            layer_name = layer.name if hasattr(layer, 'name') else "未知名称"
+            current_path = f"{path_prefix}/{layer_name}" if path_prefix else layer_name
+            
+            # 获取图层类型信息
+            layer_info = []
+            
+            # 尝试获取 kind
+            try:
+                kind = layer.kind
+                layer_info.append(f"kind={kind}")
+                # 尝试获取枚举名称
+                try:
+                    kind_str = str(kind)
+                    if 'SmartObject' in kind_str or 'smartObject' in kind_str or 'smart object' in kind_str.lower():
+                        layer_info.append("🔗 可能是智能对象!")
+                    kind_name = kind_str.split('.')[-1] if '.' in kind_str else kind_str
+                    layer_info.append(f"kind_name={kind_name}")
+                except:
+                    pass
+                
+                # 检查是否等于 LayerKind.SmartObjectLayer
+                try:
+                    if kind == LayerKind.SmartObjectLayer:
+                        layer_info.append("✅ 确认是智能对象(SmartObjectLayer)")
+                    elif hasattr(LayerKind, 'SmartObjectLayer'):
+                        so_kind = getattr(LayerKind, 'SmartObjectLayer')
+                        if kind == so_kind:
+                            layer_info.append("✅ 确认是智能对象(通过属性)")
+                except:
+                    pass
+            except Exception as e:
+                layer_info.append(f"kind=无法获取({type(e).__name__}: {e})")
+            
+            # 检查类名
+            try:
+                class_name = type(layer).__name__
+                layer_info.append(f"类型={class_name}")
+                if 'Smart' in class_name or 'smart' in class_name.lower():
+                    layer_info.append("🔗 类名可能表示智能对象!")
+            except:
+                pass
+            
+            # 检查图层名称是否包含 "SmartObject" 关键字（不区分大小写）
+            try:
+                if layer_name and 'smartobject' in layer_name.lower():
+                    layer_info.append(f"✅ 图层名称包含'SmartObject'关键字 - 将被识别为智能对象! (名称: {layer_name})")
+            except:
+                pass
+            
+            # 检查是否有 layers 属性（图层组）
+            is_group = False
+            try:
+                sub_layers = layer.layers
+                if sub_layers and len(sub_layers) > 0:
+                    is_group = True
+                    layer_info.append(f"图层组(有{len(sub_layers)}个子图层)")
+            except:
+                pass
+            
+            # 检查是否有 bounds
+            try:
+                bounds = layer.bounds
+                if bounds:
+                    layer_info.append(f"bounds={bounds[:4] if len(bounds) >= 4 else bounds}")
+            except:
+                pass
+            
+            print(f"{indent_str}[图层] {layer_name}")
+            print(f"{indent_str}  路径: {current_path}")
+            print(f"{indent_str}  信息: {', '.join(layer_info)}")
+            
+            # 递归处理子图层
+            if is_group:
+                print(f"{indent_str}  └─ 子图层:")
+                try:
+                    for sub_layer in layer.layers:
+                        print_layer_info(sub_layer, depth + 1, current_path)
+                except Exception as e:
+                    print(f"{indent_str}    读取子图层失败: {e}")
+                    
+        except Exception as e:
+            print(f"{indent_str}[图层] 读取失败: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    # 开始打印
+    try:
+        layers = doc.layers
+        if not layers:
+            print(f"{indent}[无图层]")
+            return
+        
+        print(f"{indent}开始遍历 {len(layers)} 个顶层图层...")
+        for i, layer in enumerate(layers):
+            print(f"{indent}--- 图层 {i+1}/{len(layers)} ---")
+            print_layer_info(layer, current_depth, parent_path)
+            print()
+                
+    except Exception as e:
+        print(f"{indent}遍历图层失败: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+def find_smart_object_layers(doc, layer_name: Optional[str] = None, debug: bool = False) -> List:
     """
     递归查找 PSD 中的所有智能对象图层
     
     Args:
         doc: Photoshop 文档对象
         layer_name: 可选，指定要查找的智能对象图层名称（如果为 None 则返回所有智能对象）
+        debug: 是否打印详细的调试信息
     
     Returns:
         智能对象图层列表，每个元素包含：
@@ -106,23 +230,179 @@ def find_smart_object_layers(doc, layer_name: Optional[str] = None) -> List:
         - bounds: 图层边界信息
     """
     smart_objects = []
+    layer_count = 0
+    checked_count = 0
     
-    def search_layers(layers, parent_path=""):
+    def search_layers(layers, parent_path="", depth=0):
         """递归搜索图层"""
+        nonlocal layer_count, checked_count
+        
         if not layers:
+            if debug:
+                print(f"{'  ' * depth}[搜索] 图层集合为空或None")
             return
         
-        for layer in layers:
-            try:
-                current_path = f"{parent_path}/{layer.name}" if parent_path else layer.name
-            except Exception:
-                # 如果无法获取图层名称，跳过
-                current_path = "未知图层"
+        # 确保 layers 是可迭代的
+        try:
+            layers_list = list(layers) if hasattr(layers, '__iter__') else [layers]
+        except:
+            if debug:
+                print(f"{'  ' * depth}[搜索] 无法将图层集合转换为列表")
+            return
+        
+        if debug:
+            print(f"{'  ' * depth}[搜索] 开始检查 {len(layers_list)} 个图层 (路径: {parent_path or '根'})")
+        
+        for idx, layer in enumerate(layers_list):
+            layer_count += 1
+            checked_count += 1
             
-            # 检查是否为智能对象（使用 try-except 安全访问 kind 属性）
             try:
-                layer_kind = layer.kind
-                if layer_kind == LayerKind.SmartObjectLayer:
+                # 获取图层名称
+                layer_name_str = None
+                try:
+                    layer_name_str = layer.name if hasattr(layer, 'name') else None
+                    current_path = f"{parent_path}/{layer_name_str}" if parent_path and layer_name_str else (layer_name_str or "未知图层")
+                except Exception as e:
+                    if debug:
+                        print(f"{'  ' * depth}[{idx+1}] 无法获取图层名称: {e}")
+                    current_path = "未知图层"
+                    layer_name_str = None
+                
+                if debug:
+                    print(f"{'  ' * depth}[{idx+1}/{len(layers_list)}] 检查图层: {layer_name_str or '未知名称'} (路径: {current_path})")
+                
+                # 检查是否为智能对象（使用多种方法检测）
+                is_smart_object = False
+                detection_method = None
+                detection_details = []  # 记录所有检测方法的详细信息
+                
+                # 方法1: 检查 layer.kind == LayerKind.SmartObjectLayer
+                try:
+                    layer_kind = layer.kind
+                    kind_str_repr = str(layer_kind)
+                    detection_details.append(f"kind={kind_str_repr}")
+                    
+                    # 获取 LayerKind.SmartObjectLayer 的值进行比较
+                    try:
+                        so_kind_value = LayerKind.SmartObjectLayer
+                        if layer_kind == so_kind_value:
+                            is_smart_object = True
+                            detection_method = "LayerKind.SmartObjectLayer"
+                            if debug:
+                                print(f"{'  ' * depth}    ✅ 方法1成功: kind == LayerKind.SmartObjectLayer ({kind_str_repr})")
+                        else:
+                            if debug:
+                                print(f"{'  ' * depth}    ❌ 方法1失败: kind={kind_str_repr}, SmartObjectLayer={so_kind_value}")
+                    except Exception as e1:
+                        if debug:
+                            print(f"{'  ' * depth}    ⚠️ 方法1异常: 无法获取LayerKind.SmartObjectLayer: {e1}")
+                except (AttributeError, NameError, TypeError, KeyError) as e:
+                    detection_details.append(f"kind=无此属性({type(e).__name__})")
+                    if debug:
+                        print(f"{'  ' * depth}    ❌ 方法1: 图层没有kind属性")
+                except Exception as e:
+                    detection_details.append(f"kind=错误({type(e).__name__}: {e})")
+                    if debug:
+                        print(f"{'  ' * depth}    ❌ 方法1异常: {e}")
+                
+                # 方法2: 检查 kind 的字符串表示
+                if not is_smart_object:
+                    try:
+                        kind_str = str(layer.kind).lower()
+                        detection_details.append(f"kind字符串={kind_str}")
+                        if 'smartobject' in kind_str or 'smart object' in kind_str:
+                            is_smart_object = True
+                            detection_method = f"kind字符串匹配({layer.kind})"
+                            if debug:
+                                print(f"{'  ' * depth}    ✅ 方法2成功: kind字符串包含'smartobject'")
+                        else:
+                            if debug:
+                                print(f"{'  ' * depth}    ❌ 方法2失败: kind字符串不包含'smartobject'")
+                    except Exception as e:
+                        if debug:
+                            print(f"{'  ' * depth}    ❌ 方法2异常: {e}")
+                
+                # 方法3: 检查类名
+                if not is_smart_object:
+                    try:
+                        class_name = type(layer).__name__
+                        class_name_lower = class_name.lower()
+                        detection_details.append(f"类名={class_name}")
+                        if 'smart' in class_name_lower and 'object' in class_name_lower:
+                            is_smart_object = True
+                            detection_method = f"类名匹配({class_name})"
+                            if debug:
+                                print(f"{'  ' * depth}    ✅ 方法3成功: 类名包含'smart'和'object'")
+                        else:
+                            if debug:
+                                print(f"{'  ' * depth}    ❌ 方法3失败: 类名={class_name}")
+                    except Exception as e:
+                        if debug:
+                            print(f"{'  ' * depth}    ❌ 方法3异常: {e}")
+                
+                # 方法4: 尝试使用 Photoshop API 的其他方法检测
+                if not is_smart_object:
+                    try:
+                        has_is_smart = hasattr(layer, 'isSmartObject')
+                        detection_details.append(f"hasattr(isSmartObject)={has_is_smart}")
+                        if has_is_smart:
+                            so_value = layer.isSmartObject
+                            detection_details.append(f"isSmartObject={so_value}")
+                            if so_value:
+                                is_smart_object = True
+                                detection_method = "isSmartObject属性"
+                                if debug:
+                                    print(f"{'  ' * depth}    ✅ 方法4成功: isSmartObject=True")
+                            else:
+                                if debug:
+                                    print(f"{'  ' * depth}    ❌ 方法4失败: isSmartObject=False")
+                        else:
+                            if debug:
+                                print(f"{'  ' * depth}    ❌ 方法4: 图层没有isSmartObject属性")
+                    except Exception as e:
+                        if debug:
+                            print(f"{'  ' * depth}    ❌ 方法4异常: {e}")
+                
+                # 方法5: 检查图层名称是否包含 "SmartObject" 关键字（不区分大小写）
+                if not is_smart_object:
+                    try:
+                        name_str = str(layer_name_str) if layer_name_str else ""
+                        detection_details.append(f"图层名称={name_str}")
+                        if name_str and 'smartobject' in name_str.lower():
+                            is_smart_object = True
+                            detection_method = f"图层名称关键字匹配(包含'SmartObject': {name_str})"
+                            if debug:
+                                print(f"{'  ' * depth}    ✅ 方法5成功: 图层名称包含'SmartObject'")
+                        else:
+                            if debug:
+                                print(f"{'  ' * depth}    ❌ 方法5失败: 图层名称={name_str}")
+                    except Exception as e:
+                        if debug:
+                            print(f"{'  ' * depth}    ❌ 方法5异常: {e}")
+                
+                # 方法6: 尝试检查图层的所有属性，查找可能包含"smart"的属性
+                if not is_smart_object:
+                    if debug:
+                        try:
+                            attrs = [attr for attr in dir(layer) if not attr.startswith('_')]
+                            smart_attrs = [attr for attr in attrs if 'smart' in attr.lower()]
+                            if smart_attrs:
+                                print(f"{'  ' * depth}    💡 方法6: 发现可能相关的属性: {smart_attrs}")
+                                # 尝试检查这些属性
+                                for attr in smart_attrs:
+                                    try:
+                                        value = getattr(layer, attr)
+                                        print(f"{'  ' * depth}      {attr} = {value}")
+                                        if value and (value is True or (isinstance(value, str) and 'smart' in str(value).lower())):
+                                            detection_details.append(f"属性{attr}={value}")
+                                    except:
+                                        pass
+                        except:
+                            pass
+                
+                # 如果检测到智能对象，记录信息
+                if is_smart_object:
                     if layer_name is None or layer.name == layer_name:
                         # 获取图层尺寸信息
                         # 注意：layer.bounds 可能不准确，实际尺寸会在替换时从智能对象文档获取
@@ -167,32 +447,133 @@ def find_smart_object_layers(doc, layer_name: Optional[str] = None) -> List:
                             'path': current_path,
                             'width': width if width > 0 else None,
                             'height': height if height > 0 else None,
-                            'bounds': bounds
+                            'bounds': bounds,
+                            'detection_method': detection_method,
+                            'detection_details': detection_details
                         })
-            except (AttributeError, NameError, TypeError, KeyError):
-                # 某些图层类型（如图层组）可能没有 kind 属性，这是正常的
-                pass
-            except Exception:
-                # 其他未知错误也忽略，继续处理下一个图层
-                pass
-            
-            # 如果是图层组（LayerSet），递归搜索子图层
-            # LayerSet 有 layers 属性，而 ArtLayer 没有
-            # 直接尝试访问，如果出错说明不是图层组，忽略即可
-            try:
-                layer_layers = layer.layers
-                # 检查是否有子图层
-                if layer_layers and len(layer_layers) > 0:
-                    search_layers(layer_layers, current_path)
-            except (AttributeError, NameError, TypeError, KeyError):
-                # ArtLayer 没有 layers 属性，这是正常的，跳过
-                pass
-            except Exception:
-                # 其他未知错误也忽略，继续处理下一个图层
-                pass
+                        if debug:
+                            print(f"{'  ' * depth}    🎉 已记录为智能对象! (检测方法: {detection_method})")
+                    else:
+                        if debug:
+                            print(f"{'  ' * depth}    ⏭️ 图层名称不匹配，跳过记录 (期望: {layer_name}, 实际: {layer_name_str})")
+                else:
+                    if debug:
+                        print(f"{'  ' * depth}    ❌ 不是智能对象 (尝试了所有检测方法)")
+                        if detection_details:
+                            print(f"{'  ' * depth}      检测详情: {', '.join(detection_details)}")
+                
+                # 如果是图层组（LayerSet），递归搜索子图层
+                # LayerSet 有 layers 属性，而 ArtLayer 没有
+                # 使用多种方法尝试获取子图层
+                has_sub_layers = False
+                sub_layers_list = None
+                
+                # 方法1: 直接访问 layer.layers
+                try:
+                    if hasattr(layer, 'layers'):
+                        sub_layers_list = layer.layers
+                        if sub_layers_list:
+                            try:
+                                sub_count = len(sub_layers_list)
+                                if sub_count > 0:
+                                    has_sub_layers = True
+                                    if debug:
+                                        print(f"{'  ' * depth}    📁 发现图层组，包含 {sub_count} 个子图层，开始递归...")
+                            except:
+                                # 如果无法获取长度，但存在layers属性，也尝试递归
+                                has_sub_layers = True
+                                if debug:
+                                    print(f"{'  ' * depth}    📁 发现图层组（无法获取子图层数量），开始递归...")
+                except (AttributeError, NameError, TypeError, KeyError):
+                    pass
+                except Exception as e:
+                    if debug:
+                        print(f"{'  ' * depth}    ⚠️ 检查layers属性时出错: {e}")
+                
+                # 方法2: 尝试通过其他属性访问子图层
+                if not has_sub_layers:
+                    try:
+                        # 某些API可能使用不同的属性名
+                        alt_attrs = ['artLayers', 'layerSets', 'children', 'subLayers']
+                        for attr in alt_attrs:
+                            if hasattr(layer, attr):
+                                try:
+                                    alt_layers = getattr(layer, attr)
+                                    if alt_layers:
+                                        try:
+                                            if len(alt_layers) > 0:
+                                                has_sub_layers = True
+                                                sub_layers_list = alt_layers
+                                                if debug:
+                                                    print(f"{'  ' * depth}    📁 通过属性'{attr}'发现 {len(alt_layers)} 个子图层")
+                                                break
+                                        except:
+                                            pass
+                                except:
+                                    pass
+                    except:
+                        pass
+                
+                # 递归处理子图层
+                if has_sub_layers and sub_layers_list:
+                    try:
+                        search_layers(sub_layers_list, current_path, depth + 1)
+                    except Exception as e:
+                        if debug:
+                            print(f"{'  ' * depth}    ❌ 递归处理子图层时出错: {e}")
+                            import traceback
+                            traceback.print_exc()
+                else:
+                    if debug and not is_smart_object:
+                        # 尝试判断是否是图层组但无法获取子图层
+                        try:
+                            layer_type = type(layer).__name__
+                            if 'Group' in layer_type or 'Set' in layer_type or 'Folder' in layer_type:
+                                print(f"{'  ' * depth}    ⚠️ 可能是图层组 ({layer_type})，但无法获取子图层")
+                        except:
+                            pass
+            except Exception as e:
+                # 处理图层时发生的异常
+                checked_count -= 1  # 这个图层检查失败，不计入已检查数量
+                if debug:
+                    print(f"{'  ' * depth}[{idx+1}] ❌ 处理图层时发生异常: {type(e).__name__}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                # 即使出错也继续处理下一个图层
+                continue
     
     # 从文档的顶层图层开始搜索
-    search_layers(doc.layers)
+    if debug:
+        print("\n" + "=" * 70)
+        print("🔍 开始搜索智能对象图层...")
+        print("=" * 70)
+    
+    try:
+        top_layers = doc.layers
+        if not top_layers:
+            if debug:
+                print("⚠️ 文档没有顶层图层")
+        else:
+            search_layers(top_layers, "", 0)
+    except Exception as e:
+        if debug:
+            print(f"❌ 开始搜索时出错: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    # 打印统计信息
+    if debug:
+        print("\n" + "=" * 70)
+        print("📊 搜索统计")
+        print("=" * 70)
+        print(f"总图层数: {layer_count}")
+        print(f"成功检查: {checked_count}")
+        print(f"找到智能对象: {len(smart_objects)}")
+        if smart_objects:
+            print(f"\n找到的智能对象列表:")
+            for i, so in enumerate(smart_objects, 1):
+                print(f"  [{i}] {so['name']} (路径: {so['path']}, 方法: {so['detection_method']})")
+        print("=" * 70 + "\n")
     
     return smart_objects
 
@@ -624,6 +1005,26 @@ def replace_and_export_psd(
         app = session.app
         doc = app.open(str(psd_path))
         
+        # 提前查找智能对象图层（用于在PSD文件信息中显示）
+        # 如果指定了名称，先查找所有智能对象以便提供更好的错误信息
+        # 先尝试普通模式查找
+        if smart_object_name:
+            all_smart_objects = find_smart_object_layers(doc, None, debug=False)
+            smart_objects = find_smart_object_layers(doc, smart_object_name, debug=False)
+        else:
+            smart_objects = find_smart_object_layers(doc, None, debug=False)
+            all_smart_objects = smart_objects  # 没有指定名称时，两者相同
+        
+        # 如果没找到智能对象，使用调试模式重新查找
+        if not smart_objects or not all_smart_objects:
+            print("\n⚠️ 第一次查找未找到智能对象，启用详细调试模式重新查找...\n")
+            if smart_object_name:
+                all_smart_objects = find_smart_object_layers(doc, None, debug=True)
+                smart_objects = find_smart_object_layers(doc, smart_object_name, debug=True)
+            else:
+                smart_objects = find_smart_object_layers(doc, None, debug=True)
+                all_smart_objects = smart_objects
+        
         # ========== 打印 PSD 文件基本信息 ==========
         print("\n" + "=" * 70)
         print("📋 PSD 文件信息")
@@ -636,59 +1037,124 @@ def replace_and_export_psd(
         print(f"颜色模式: {doc.mode}")
         print(f"颜色深度: {doc.bitsPerChannel} bit")
         print(f"图层总数: {len(doc.layers)} (顶层)")
-        print("=" * 70)
         
-        # 查找智能对象图层
-        # 如果指定了名称，先查找所有智能对象以便提供更好的错误信息
+        # 显示智能图层统计信息
+        print(f"\n智能图层统计:")
+        print(f"  智能图层总数: {len(all_smart_objects)}")
         if smart_object_name:
-            all_smart_objects = find_smart_object_layers(doc, None)
-            smart_objects = find_smart_object_layers(doc, smart_object_name)
-            
-            if not smart_objects:
-                doc.close()
+            print(f"  匹配指定名称 '{smart_object_name}' 的图层: {len(smart_objects)}")
+            if len(smart_objects) == 0:
                 if all_smart_objects:
                     available_names = [so['name'] for so in all_smart_objects]
-                    raise ValueError(
-                        f"未找到名为 '{smart_object_name}' 的智能对象图层。\n"
-                        f"可用的智能对象名称: {', '.join(available_names)}\n"
-                        f"提示: 如果不指定 smart_object_name，将自动使用第一个找到的智能对象"
-                    )
-                else:
-                    raise ValueError("PSD 文件中没有找到任何智能对象图层")
+                    print(f"  所有智能图层名称: {', '.join(available_names)}")
         else:
-            smart_objects = find_smart_object_layers(doc, None)
-            if not smart_objects:
-                doc.close()
-                raise ValueError("PSD 文件中没有找到任何智能对象图层")
+            print(f"  将处理的图层数: {len(smart_objects)}")
+        
+        # 显示智能图层列表（简要信息）
+        if all_smart_objects:
+            print(f"\n智能图层列表:")
+            for i, so in enumerate(all_smart_objects, 1):
+                name = so['name']
+                path = so['path']
+                width = so['width'] if so['width'] else '?'
+                height = so['height'] if so['height'] else '?'
+                detection_method = so.get('detection_method', '未知方法')
+                
+                # 标记是否会被处理
+                # 检查当前图层是否在将要处理的列表中
+                will_process = ""
+                if any(s['name'] == name and s['path'] == path for s in smart_objects):
+                    will_process = " ⭐ 将处理"
+                elif smart_object_name:
+                    will_process = " ⏭️ 跳过 (名称不匹配)"
+                
+                print(f"  [{i}] {name} {will_process}")
+                print(f"      路径: {path}")
+                print(f"      尺寸: {width} x {height} 像素")
+                print(f"      检测方法: {detection_method}")
+        else:
+            print(f"  ⚠️ 未找到任何智能图层")
+        
+        print("=" * 70)
+        
+        # 验证智能对象是否存在
+        if not smart_objects:
+            # 如果没找到智能对象，打印调试信息
+            print("\n" + "=" * 70)
+            print("⚠️  未找到智能对象图层 - 开始调试模式")
+            print("=" * 70)
+            print("正在打印所有图层信息以帮助排查问题...\n")
+            try:
+                debug_print_all_layers(doc, max_depth=5)
+            except Exception as e:
+                print(f"调试信息打印失败: {e}")
+                import traceback
+                traceback.print_exc()
+            print("\n" + "=" * 70)
+            
+            doc.close()
+            if all_smart_objects:
+                available_names = [so['name'] for so in all_smart_objects]
+                raise ValueError(
+                    f"未找到名为 '{smart_object_name}' 的智能对象图层。\n"
+                    f"可用的智能对象名称: {', '.join(available_names)}\n"
+                    f"提示: 如果不指定 smart_object_name，将自动使用第一个找到的智能对象"
+                )
+            else:
+                error_msg = (
+                    "PSD 文件中没有找到任何智能对象图层。\n"
+                    "可能的原因：\n"
+                    "1. PSD 文件中确实没有智能对象图层\n"
+                    "2. 智能对象的类型标识与程序检测方法不匹配\n"
+                    "3. 图层被嵌套在特殊的图层组中\n"
+                    "\n"
+                    "已在上方打印了所有图层的调试信息，请检查：\n"
+                    "- 图层的 kind 值\n"
+                    "- 图层的类型名称\n"
+                    "- 是否存在包含 'Smart' 或 'smart' 的标识"
+                )
+                raise ValueError(error_msg)
         
         # ========== 打印智能对象详细信息 ==========
         print("\n" + "=" * 70)
-        print("🔗 智能对象信息")
+        print("🔗 智能对象详细信息")
         print("=" * 70)
-        print(f"找到 {len(smart_objects)} 个智能对象图层:")
+        print(f"将处理 {len(smart_objects)} 个智能对象图层:")
         for i, so in enumerate(smart_objects, 1):
-            print(f"\n  [{i}] {so['name']}")
-            print(f"      路径: {so['path']}")
+            print(f"\n  [{i}/{len(smart_objects)}] {so['name']}")
+            print(f"      图层路径: {so['path']}")
             
             # 显示尺寸信息
             if so['width'] and so['height'] and so['width'] > 0 and so['height'] > 0:
-                print(f"      尺寸: {so['width']} x {so['height']} 像素")
+                print(f"      图层尺寸: {so['width']} x {so['height']} 像素")
             else:
-                print(f"      尺寸: 未知 (将在替换时从智能对象文档获取)")
+                print(f"      图层尺寸: 未知 (将在替换时从智能对象文档获取)")
             
-            # 显示位置信息
+            # 显示位置信息（bounds）
             if so['bounds']:
                 try:
-                    print(f"      位置: ({int(so['bounds'][0])}, {int(so['bounds'][1])})")
-                except:
-                    print(f"      位置: 未知")
+                    bounds = so['bounds']
+                    left = int(bounds[0])
+                    top = int(bounds[1])
+                    right = int(bounds[2])
+                    bottom = int(bounds[3])
+                    print(f"      图层位置: 左上角 ({left}, {top})")
+                    print(f"      图层边界: ({left}, {top}) -> ({right}, {bottom})")
+                    print(f"      实际尺寸: {right - left} x {bottom - top} 像素 (从bounds计算)")
+                except Exception as e:
+                    print(f"      图层位置: 未知 (解析bounds失败: {e})")
             else:
-                print(f"      位置: 未知")
+                print(f"      图层位置: 未知 (无bounds信息)")
             
-            if smart_object_name and so['name'] == smart_object_name:
-                print(f"      ⭐ 已指定此智能对象")
-            elif smart_object_name is None:
-                print(f"      ⭐ 将处理此智能对象")
+            # 显示检测方法
+            detection_method = so.get('detection_method', '未知方法')
+            print(f"      检测方法: {detection_method}")
+            
+            # 显示处理标记
+            if smart_object_name:
+                print(f"      处理状态: ⭐ 已匹配指定名称 '{smart_object_name}'")
+            else:
+                print(f"      处理状态: ⭐ 将自动处理")
         print("=" * 70)
         
         # ========== 打印替换信息 ==========
