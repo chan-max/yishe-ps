@@ -3,15 +3,18 @@ PSD 智能对象替换 API 服务启动入口
 项目根目录启动脚本
 """
 
+import os
 import sys
 import uvicorn
 from pathlib import Path
+import psutil
 
 # 添加项目路径
 # PyInstaller 打包后的路径处理
 if getattr(sys, 'frozen', False):
     # 打包后的可执行文件
     project_root = Path(sys.executable).parent
+    persistent_root = Path(sys.executable).parent
     # 如果是单文件模式，需要特殊处理
     if hasattr(sys, '_MEIPASS'):
         # PyInstaller 临时目录
@@ -19,8 +22,78 @@ if getattr(sys, 'frozen', False):
 else:
     # 开发模式
     project_root = Path(__file__).parent
+    persistent_root = project_root
 
 sys.path.insert(0, str(project_root))
+
+# 记录 PID 的文件路径，放在 exe 同级目录（或源码目录）
+PID_FILE = persistent_root / "yishe-ps.pid"
+
+
+def write_pid():
+    """写入当前进程 PID，方便后续 stop 命令使用"""
+    try:
+        PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
+    except Exception:
+        # 不因 PID 文件失败而影响服务启动
+        pass
+
+
+def read_pid():
+    """读取 pid 文件"""
+    if PID_FILE.exists():
+        try:
+            return int(PID_FILE.read_text().strip())
+        except Exception:
+            return None
+    return None
+
+
+def clear_pid():
+    """删除 pid 文件"""
+    try:
+        if PID_FILE.exists():
+            PID_FILE.unlink()
+    except Exception:
+        pass
+
+
+def stop_running_instance():
+    """尝试停止已运行的服务"""
+    pid = read_pid()
+    if not pid:
+        print("未找到运行中的服务（缺少 pid 文件）")
+        return
+
+    try:
+        p = psutil.Process(pid)
+    except psutil.NoSuchProcess:
+        print(f"进程 {pid} 不存在，清理 pid 文件")
+        clear_pid()
+        return
+
+    # 仅针对同一可执行文件/脚本的进程做校验，避免误杀
+    try:
+        exe_path = Path(p.exe()) if p.exe() else None
+        current_exe = Path(sys.executable)
+        if exe_path and current_exe and exe_path.name != current_exe.name:
+            print(f"发现 pid {pid} 不是当前服务，已跳过")
+            return
+    except Exception:
+        # 如果取 exe 失败，不阻塞后续终止逻辑
+        pass
+
+    print(f"正在停止服务 (pid={pid}) ...")
+    p.terminate()
+    try:
+        p.wait(timeout=10)
+        print("服务已停止")
+    except psutil.TimeoutExpired:
+        print("正常停止超时，尝试强制结束")
+        p.kill()
+        print("服务已强制结束")
+    finally:
+        clear_pid()
 
 
 def main():
@@ -61,8 +134,17 @@ def main():
         default=1,
         help="工作进程数（默认: 1，注意：Photoshop 不支持多进程，建议保持为 1）"
     )
+    parser.add_argument(
+        "--stop",
+        action="store_true",
+        help="停止已启动的服务（通过 pid 文件定位进程）"
+    )
     
     args = parser.parse_args()
+    # 如果是 stop 命令，直接尝试停止并退出
+    if args.stop:
+        stop_running_instance()
+        return
     
     # 显示启动信息
     print("=" * 70)
@@ -92,9 +174,12 @@ def main():
     # 启动服务
     try:
         print("\n正在启动服务...\n")
+        print(f"PID 文件: {PID_FILE}")
         print("提示: 服务运行中，此窗口将保持打开")
         print("提示: 按 Ctrl+C 可以停止服务")
         print("提示: 关闭此窗口将停止服务\n")
+        
+        write_pid()
         
         # 使用 uvicorn.run 启动服务（会阻塞直到服务停止）
         if getattr(sys, 'frozen', False):
@@ -159,6 +244,8 @@ def main():
             import time
             time.sleep(5)  # 等待5秒让用户看到错误信息
         sys.exit(1)
+    finally:
+        clear_pid()
 
 
 if __name__ == "__main__":

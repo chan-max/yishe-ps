@@ -2,7 +2,7 @@
 
 
 a = Analysis(
-    ['server.py'],
+    ['ps.py'],
     pathex=[],
     binaries=[],
     datas=[
@@ -57,7 +57,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='server',
+    name='ps',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
