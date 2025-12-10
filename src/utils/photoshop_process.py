@@ -102,8 +102,9 @@ def start_photoshop(timeout: int = 30) -> bool:
             time.sleep(1)
             if is_photoshop_running():
                 print("✅ Photoshop 启动成功")
-                # 额外等待几秒让 Photoshop 完全初始化
-                time.sleep(3)
+                # 额外等待更长时间让 Photoshop 完全初始化 COM 接口
+                print("等待 Photoshop COM 接口初始化...")
+                time.sleep(5)  # 增加等待时间到 5 秒
                 return True
         
         print("❌ Photoshop 启动超时")
@@ -142,4 +143,68 @@ def close_photoshop_process() -> None:
                 proc.terminate()
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             continue
+
+
+def create_photoshop_session(max_retries: int = 5, retry_delay: int = 2):
+    """创建 Photoshop Session，带重试逻辑。
+    
+    Args:
+        max_retries: 最大重试次数，默认 5
+        retry_delay: 初始重试延迟（秒），默认 2，每次重试会增加
+        
+    Returns:
+        Session 对象
+        
+    Raises:
+        RuntimeError: 如果无法创建 Session
+    """
+    from photoshop import Session
+    import time
+    
+    # 确保 Photoshop 正在运行
+    if not ensure_photoshop_running(auto_start=True):
+        raise RuntimeError("无法启动 Photoshop，请确保 Photoshop 已正确安装")
+    
+    # 等待一下，确保 Photoshop COM 接口完全初始化
+    print("等待 Photoshop COM 接口初始化...")
+    time.sleep(3)
+    
+    session = None
+    last_error = None
+    current_delay = retry_delay
+    
+    for attempt in range(max_retries):
+        try:
+            if attempt > 0:
+                print(f"尝试连接 Photoshop COM 接口 (尝试 {attempt + 1}/{max_retries})...")
+            session = Session()
+            if attempt > 0:
+                print("成功连接到 Photoshop COM 接口")
+            break
+        except Exception as e:
+            last_error = e
+            error_msg = str(e)
+            # 检查是否是 COM 初始化错误
+            if "无效的类字符串" in error_msg or "WinError -2147221005" in error_msg or "WinError 259" in error_msg:
+                if attempt < max_retries - 1:
+                    print(f"COM 接口尚未就绪，等待 {current_delay} 秒后重试...")
+                    time.sleep(current_delay)
+                    current_delay += 1  # 每次增加 1 秒
+                else:
+                    raise RuntimeError(
+                        f"无法连接到 Photoshop COM 接口。\n"
+                        f"错误: {error_msg}\n"
+                        f"请确保：\n"
+                        f"1. Photoshop 已正确安装\n"
+                        f"2. Photoshop 正在运行\n"
+                        f"3. 以管理员权限运行程序"
+                    ) from e
+            else:
+                # 其他错误，直接抛出
+                raise
+    
+    if session is None:
+        raise RuntimeError(f"无法创建 Photoshop Session: {last_error}")
+    
+    return session
 

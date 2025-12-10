@@ -27,13 +27,13 @@ class PsSaveOptions:
 
 # 支持相对导入和绝对导入
 try:
-    from .utils import ensure_photoshop_running, validate_job_inputs, resize_image_in_tiles
+    from .utils import ensure_photoshop_running, create_photoshop_session, validate_job_inputs, resize_image_in_tiles
 except ImportError:
     # 如果相对导入失败，尝试绝对导入
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).parent.parent))
-    from src.utils import ensure_photoshop_running, validate_job_inputs, resize_image_in_tiles
+    from src.utils import ensure_photoshop_running, create_photoshop_session, validate_job_inputs, resize_image_in_tiles
 
 
 def check_write_permission(path: Path) -> tuple[bool, str]:
@@ -998,10 +998,10 @@ def replace_and_export_psd(
             print(f"分辨率: {img_dpi} DPI")
     print("=" * 70)
     
-    # 确保 Photoshop 正在运行
-    ensure_photoshop_running(auto_start=True)
+    # 使用辅助函数创建 Session（带重试逻辑）
+    session = create_photoshop_session(max_retries=5, retry_delay=2)
     
-    with Session() as session:
+    with session:
         app = session.app
         doc = app.open(str(psd_path))
         

@@ -15,7 +15,18 @@ from pydantic import BaseModel, Field, validator, model_validator
 import uvicorn
 
 # 添加项目路径
-project_root = Path(__file__).parent.parent
+# PyInstaller 打包后的路径处理
+if getattr(sys, 'frozen', False):
+    # 打包后的可执行文件
+    if hasattr(sys, '_MEIPASS'):
+        # PyInstaller 临时目录
+        project_root = Path(sys._MEIPASS)
+    else:
+        project_root = Path(sys.executable).parent
+else:
+    # 开发模式
+    project_root = Path(__file__).parent.parent
+
 sys.path.insert(0, str(project_root))
 
 # 默认输出目录（与服务启动文件同级的 output 目录）

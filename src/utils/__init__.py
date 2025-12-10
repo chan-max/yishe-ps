@@ -5,6 +5,7 @@ from .image_utils import resize_image_in_tiles
 from .photoshop_process import (
     close_photoshop_process,
     ensure_photoshop_running,
+    create_photoshop_session,
     find_photoshop_executable,
     is_photoshop_running,
     start_photoshop,
@@ -20,6 +21,7 @@ __all__ = [
     "find_photoshop_executable",
     "start_photoshop",
     "ensure_photoshop_running",
+    "create_photoshop_session",
     "close_photoshop_process",
 ]
 
