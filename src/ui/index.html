@@ -446,7 +446,8 @@
 
         const client = () => axios.create({
           baseURL: state.baseUrl,
-          timeout: 15000
+          // 不设置超时时间，让后端自行控制
+          timeout: 0
         });
 
         function stripQuotes(p) {
