@@ -533,11 +533,6 @@
             state.lastLog = '请填写 PSD 路径';
             return;
           }
-          // 提示可能的非法字符，但不阻塞
-          // eslint-disable-next-line no-useless-escape
-          if (/[<>:"|?*]/.test(state.analyze.psd_path)) {
-            state.lastLog = '提示：路径包含特殊字符，可能导致处理失败，请检查。';
-          }
           state.loading.analyze = true;
           try {
             const { data } = await client().post('/analyzePsd', { psd_path: state.analyze.psd_path });
@@ -560,10 +555,6 @@
           if (!state.process.psd_path || !state.process.image_path) {
             state.lastLog = '请填写 PSD 路径和素材图片路径';
             return;
-          }
-          const warnChars = /[<>:"|?*]/;
-          if (warnChars.test(state.process.psd_path) || warnChars.test(state.process.image_path) || warnChars.test(state.process.export_dir || '')) {
-            state.lastLog = '提示：路径包含特殊字符，可能导致处理失败，请检查。';
           }
           const payload = { ...state.process };
           if (!payload.export_dir) delete payload.export_dir;
