@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PSD 智能对象服务控制台</title>
+  <!-- Vue 3 & axios CDN -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.7.7/dist/axios.min.js"></script>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      --primary: #2b7cff;
+      --bg: #f7f9fc;
+      --card: #ffffff;
+      --border: #e5e8ef;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --success: #16a34a;
+      --danger: #dc2626;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    .layout {
+      display: flex;
+      min-height: 100vh;
+    }
+    .sider {
+      position: fixed;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 240px;
+      background: #0f172a;
+      color: #e2e8f0;
+      border-right: 1px solid #111827;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 20px 16px;
+      overflow-y: auto;
+    }
+    .logo {
+      font-weight: 600;
+      font-size: 18px;
+      color: #fff;
+    }
+    .menu {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .menu button {
+      width: 100%;
+      text-align: left;
+      border: none;
+      background: transparent;
+      color: #cbd5e1;
+      padding: 10px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+    .menu button.active {
+      background: rgba(43, 124, 255, 0.15);
+      color: #fff;
+    }
+    .menu button:hover {
+      background: rgba(255,255,255,0.08);
+      color: #fff;
+    }
+    .content {
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      margin-left: 240px;
+      width: calc(100% - 240px);
+    }
+    header {
+      padding: 16px 24px;
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    h1 { margin: 0; font-size: 20px; }
+    .muted { color: var(--muted); font-size: 13px; }
+    .container {
+      width: 100%;
+      padding: 20px 24px 48px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    section { scroll-margin-top: 80px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 22px;
+      box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
+    }
+    .card h2 {
+      margin: 0 0 12px;
+      font-size: 17px;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 14px;
+      margin-bottom: 10px;
+    }
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    input, select, textarea {
+      height: 40px;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+      background: #fff;
+    }
+    textarea {
+      min-height: 80px;
+      height: auto;
+      resize: vertical;
+      line-height: 1.5;
+      font-family: Consolas, monospace;
+    }
+    input:focus, select:focus, textarea:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(43, 124, 255, 0.15);
+    }
+    button {
+      padding: 10px 16px;
+      border: none;
+      border-radius: 8px;
+      background: var(--primary);
+      color: #fff;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background 0.15s ease, transform 0.05s ease;
+    }
+    button:active { transform: translateY(1px); }
+    button[disabled] {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 13px;
+      border: 1px solid var(--border);
+      background: #f8fafc;
+    }
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--muted);
+    }
+    .dot.ok { background: var(--success); }
+    .dot.fail { background: var(--danger); }
+    pre {
+      margin: 0;
+      background: #0f172a;
+      color: #e2e8f0;
+      padding: 12px;
+      border-radius: 8px;
+      overflow: auto;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 8px;
+      align-items: center;
+    }
+    .actions.no-wrap {
+      flex-wrap: nowrap;
+      gap: 12px;
+    }
+    .checkbox-inline {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--muted);
+      margin: 0;
+      white-space: nowrap;
+      flex-shrink: 0;
+      flex-wrap: nowrap;
+      line-height: 1.4;
+      text-overflow: ellipsis;
+      overflow: hidden;
+    }
+    .checkbox-inline input {
+      width: 16px;
+      height: 16px;
+      margin: 0;
+      accent-color: var(--primary);
+      cursor: pointer;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div id="app" class="layout">
+    <!-- 左侧菜单 -->
+    <aside class="sider">
+      <div class="logo">PSD 服务控制台</div>
+      <div class="menu">
+        <button :class="{active: state.activeSection === 'config'}" @click="goSection('config')">服务配置</button>
+        <button :class="{active: state.activeSection === 'analyze'}" @click="goSection('analyze')">PSD 分析</button>
+        <button :class="{active: state.activeSection === 'process'}" @click="goSection('process')">PSD 处理</button>
+        <button :class="{active: state.activeSection === 'debug'}" @click="goSection('debug')">调试输出</button>
+      </div>
+    </aside>
+
+    <!-- 右侧主体 -->
+    <div class="content">
+      <header>
+        <h1 style="margin-bottom:4px;">PSD 智能对象服务控制台</h1>
+      </header>
+
+      <main class="container">
+        <!-- 使用指南 -->
+        <section id="guide">
+          <div class="card">
+            <h2>使用指南</h2>
+            <div class="muted" style="line-height:1.6;">
+              1) 先配置 API 地址与超时，点击健康检查。<br>
+              2) 如需 Photoshop 支持，先“启动 Photoshop”再检测状态。<br>
+              3) 分析 PSD 结构（/analyzePsd），确认智能对象信息。<br>
+              4) 填写处理参数，执行 /processPsd 完成替换导出。<br>
+              5) 调试输出区查看最近请求和错误信息。<br>
+              路径需为本机有效 Windows 路径（示例：D:\path\file.psd），避免包含 <code>&lt;&gt;:"|?*</code> 等非法字符。
+            </div>
+          </div>
+        </section>
+
+        <!-- 基础配置 -->
+        <section id="config">
+          <div class="card">
+            <h2>服务配置</h2>
+            <div class="row">
+              <label>
+                API 基础地址
+                <input v-model="state.baseUrl" placeholder="例如 http://localhost:1595" />
+              </label>
+              <label>
+                端点速查
+                <div class="muted">
+                  /health · /photoshopStatus · /analyzePsd · /processPsd · /startPhotoshop
+                </div>
+              </label>
+              <label>
+                Photoshop 启动超时（秒）
+                <input type="number" min="5" max="120" v-model.number="state.startTimeout" />
+              </label>
+            </div>
+            <div class="actions">
+              <button @click="checkHealth" :disabled="state.loading.health"> 
+                {{ state.loading.health ? '健康检查中...' : '健康检查' }}
+              </button>
+              <button @click="startPhotoshop" :disabled="state.loading.startPs">
+                {{ state.loading.startPs ? '启动中...' : '启动 Photoshop' }}
+              </button>
+              <button @click="checkPhotoshop" :disabled="state.loading.checkPs">
+                {{ state.loading.checkPs ? '检测中...' : '检测 Photoshop 状态' }}
+              </button>
+            </div>
+            <div class="actions no-wrap" style="margin-top:8px;">
+              <span class="status">
+                <span class="dot" :class="{'ok': state.healthOk, 'fail': state.healthOk === false}"></span>
+                健康状态：{{ state.healthOk === null ? '未知' : (state.healthOk ? '正常' : '异常') }}
+              </span>
+              <label class="checkbox-inline">
+                <input type="checkbox" v-model="state.testConnection" />
+                Photoshop 连接深度检测 (test_connection=true)
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <!-- Photoshop 控制 -->
+        <section id="ps-control">
+          <div class="card">
+            <h2>Photoshop 控制</h2>
+            <div class="muted" style="margin-bottom:8px;">先启动再检测；若多次失败，请检查安装路径或以管理员运行。</div>
+            <div class="actions">
+              <button @click="startPhotoshop">启动 Photoshop</button>
+              <button @click="checkPhotoshop">检测 Photoshop 状态</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- PSD 分析 -->
+        <section id="analyze">
+          <div class="card">
+            <h2>PSD 分析 /analyzePsd</h2>
+            <div class="row">
+              <label>
+                PSD 文件路径
+                <input v-model="state.analyze.psd_path" placeholder="D:\path\to\file.psd" />
+              </label>
+            </div>
+            <div class="actions">
+              <button @click="analyzePsd" :disabled="state.loading.analyze">
+                {{ state.loading.analyze ? '分析中...' : '开始分析' }}
+              </button>
+            </div>
+            <div v-if="state.analyzeResult" style="margin-top:12px;">
+              <pre>{{ state.analyzeResult }}</pre>
+            </div>
+          </div>
+        </section>
+
+        <!-- PSD 处理 -->
+        <section id="process">
+          <div class="card">
+            <h2>处理 PSD /processPsd</h2>
+            <div class="row">
+              <label>
+                PSD 路径 *
+                <input v-model="state.process.psd_path" placeholder="D:\templates\template.psd" />
+              </label>
+              <label>
+                素材图片路径 *
+                <input v-model="state.process.image_path" placeholder="D:\images\image.jpg" />
+              </label>
+              <label>
+                导出目录
+                <input v-model="state.process.export_dir" placeholder="留空则使用默认 output" />
+              </label>
+              <label>
+                智能对象名称
+                <input v-model="state.process.smart_object_name" placeholder="可选，默认第一个智能对象" />
+              </label>
+              <label>
+                导出文件名
+                <input v-model="state.process.output_filename" placeholder="可选，自动加时间戳" />
+              </label>
+              <label>
+                tile_size (64-2048)
+                <input type="number" v-model.number="state.process.tile_size" min="64" max="2048" />
+              </label>
+              <label>
+                缩放模式 resize_mode
+                <select v-model="state.process.resize_mode">
+                  <option value="contain">contain (默认，等比，可能留白)</option>
+                  <option value="cover">cover (等比填充，可能裁剪)</option>
+                  <option value="stretch">stretch (拉伸变形)</option>
+                  <option value="custom">custom (自定义，需要 custom_options)</option>
+                </select>
+              </label>
+              <label v-if="state.process.resize_mode === 'custom'">
+                custom_options (JSON)
+                <textarea v-model="state.customOptionsText" placeholder='{"position": {...}, "size": {...}}'></textarea>
+              </label>
+              <label class="checkbox-inline" style="align-self:flex-end;">
+                <input type="checkbox" v-model="state.process.verbose" />
+                verbose
+              </label>
+            </div>
+            <div class="actions">
+              <button @click="processPsd" :disabled="state.loading.process">
+                {{ state.loading.process ? '处理中...' : '开始处理' }}
+              </button>
+            </div>
+            <div v-if="state.processResult" style="margin-top:12px;">
+              <pre>{{ state.processResult }}</pre>
+            </div>
+          </div>
+        </section>
+
+        <!-- 调试输出 -->
+        <section id="debug">
+          <div class="card">
+            <h2>调试输出</h2>
+            <div class="muted">最近一次调用的响应 / 错误</div>
+            <pre>{{ state.lastLog }}</pre>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    const { createApp, reactive } = Vue;
+
+    createApp({
+      setup() {
+        const state = reactive({
+          baseUrl: 'http://localhost:1595',
+          healthOk: null,
+          testConnection: false,
+          startTimeout: 30,
+          analyze: { psd_path: '' },
+          process: {
+            psd_path: '',
+            image_path: '',
+            export_dir: '',
+            smart_object_name: '',
+            output_filename: '',
+            tile_size: 512,
+            resize_mode: 'cover',
+            verbose: true
+          },
+          customOptionsText: '',
+          analyzeResult: '',
+          processResult: '',
+          lastLog: '等待操作...',
+          activeSection: 'config',
+          loading: {
+            health: false,
+            startPs: false,
+            checkPs: false,
+            analyze: false,
+            process: false
+          }
+        });
+
+        const client = () => axios.create({
+          baseURL: state.baseUrl,
+          timeout: 15000
+        });
+
+        function stripQuotes(p) {
+          if (typeof p === 'string' && p.length >= 2) {
+            if ((p.startsWith('"') && p.endsWith('"')) || (p.startsWith("'") && p.endsWith("'"))) {
+              return p.slice(1, -1);
+            }
+          }
+          return p;
+        }
+
+        function normalizePath(p) {
+          if (typeof p !== 'string') return '';
+          let v = stripQuotes(p.trim());
+          v = v.replace(/\t+/g, '');          // 去掉制表符
+          v = v.replace(/\//g, '\\');         // 统一为反斜杠
+          return v;
+        }
+
+        function pretty(obj) {
+          try {
+            return JSON.stringify(obj, null, 2);
+          } catch {
+            return String(obj);
+          }
+        }
+
+        function goSection(id) {
+          state.activeSection = id;
+          const el = document.getElementById(id);
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+        }
+
+        async function checkHealth() {
+          state.loading.health = true;
+          try {
+            const { data } = await client().get('/health');
+            state.healthOk = data?.status === 'healthy';
+            state.lastLog = pretty(data);
+          } catch (e) {
+            state.healthOk = false;
+            state.lastLog = `健康检查失败:\n${pretty(e.response?.data || e.message)}`;
+          } finally {
+            state.loading.health = false;
+          }
+        }
+
+        async function checkPhotoshop() {
+          state.loading.checkPs = true;
+          try {
+            const { data } = await client().get('/photoshopStatus', {
+              params: { test_connection: state.testConnection }
+            });
+            state.lastLog = pretty(data);
+          } catch (e) {
+            state.lastLog = `Photoshop 状态检查失败:\n${pretty(e.response?.data || e.message)}`;
+          } finally {
+            state.loading.checkPs = false;
+          }
+        }
+
+        async function startPhotoshop() {
+          state.loading.startPs = true;
+          try {
+            const { data } = await client().post('/startPhotoshop', null, {
+              params: { timeout: state.startTimeout }
+            });
+            state.lastLog = pretty(data);
+            // 启动后自动检查状态
+            await checkPhotoshop();
+          } catch (e) {
+            state.lastLog = `启动 Photoshop 失败:\n${pretty(e.response?.data || e.message)}`;
+          } finally {
+            state.loading.startPs = false;
+          }
+        }
+
+        async function analyzePsd() {
+          state.analyze.psd_path = normalizePath(state.analyze.psd_path || '');
+          if (!state.analyze.psd_path) {
+            state.lastLog = '请填写 PSD 路径';
+            return;
+          }
+          // 提示可能的非法字符，但不阻塞
+          // eslint-disable-next-line no-useless-escape
+          if (/[<>:"|?*]/.test(state.analyze.psd_path)) {
+            state.lastLog = '提示：路径包含特殊字符，可能导致处理失败，请检查。';
+          }
+          state.loading.analyze = true;
+          try {
+            const { data } = await client().post('/analyzePsd', { psd_path: state.analyze.psd_path });
+            state.analyzeResult = pretty(data);
+            state.lastLog = '分析成功';
+          } catch (e) {
+            state.analyzeResult = '';
+            state.lastLog = `分析失败:\n${pretty(e.response?.data || e.message)}`;
+          } finally {
+            state.loading.analyze = false;
+          }
+        }
+
+        async function processPsd() {
+          state.process.psd_path = normalizePath(state.process.psd_path || '');
+          state.process.image_path = normalizePath(state.process.image_path || '');
+          state.process.export_dir = normalizePath(state.process.export_dir || '');
+          state.process.smart_object_name = stripQuotes(state.process.smart_object_name || '');
+          state.process.output_filename = stripQuotes(state.process.output_filename || '');
+          if (!state.process.psd_path || !state.process.image_path) {
+            state.lastLog = '请填写 PSD 路径和素材图片路径';
+            return;
+          }
+          const warnChars = /[<>:"|?*]/;
+          if (warnChars.test(state.process.psd_path) || warnChars.test(state.process.image_path) || warnChars.test(state.process.export_dir || '')) {
+            state.lastLog = '提示：路径包含特殊字符，可能导致处理失败，请检查。';
+          }
+          const payload = { ...state.process };
+          if (!payload.export_dir) delete payload.export_dir;
+          if (!payload.smart_object_name) delete payload.smart_object_name;
+          if (!payload.output_filename) delete payload.output_filename;
+          if (payload.resize_mode !== 'custom') {
+            delete payload.custom_options;
+          } else if (state.customOptionsText.trim()) {
+            try {
+              payload.custom_options = JSON.parse(state.customOptionsText);
+            } catch (err) {
+              state.lastLog = 'custom_options 不是有效的 JSON';
+              return;
+            }
+          }
+          state.loading.process = true;
+          try {
+            const { data } = await client().post('/processPsd', payload);
+            state.processResult = pretty(data);
+            state.lastLog = '处理成功';
+          } catch (e) {
+            state.processResult = '';
+            state.lastLog = `处理失败:\n${pretty(e.response?.data || e.message)}`;
+          } finally {
+            state.loading.process = false;
+          }
+        }
+
+        return {
+          state,
+          checkHealth,
+          checkPhotoshop,
+          analyzePsd,
+          processPsd,
+          goSection,
+          startPhotoshop
+        };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>
+

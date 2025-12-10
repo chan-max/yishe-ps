@@ -10,7 +10,8 @@ from typing import Optional
 from datetime import datetime
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, validator, model_validator
 import uvicorn
 
@@ -28,6 +29,13 @@ else:
     project_root = Path(__file__).parent.parent
 
 sys.path.insert(0, str(project_root))
+
+# 静态 UI 目录（优先 src/ui，其次根目录 ui）
+STATIC_DIR_CANDIDATES = [
+    project_root / "src" / "ui",
+    project_root / "ui"
+]
+STATIC_DIR = next((p for p in STATIC_DIR_CANDIDATES if p.exists()), STATIC_DIR_CANDIDATES[0])
 
 # 默认输出目录（与服务启动文件同级的 output 目录）
 DEFAULT_EXPORT_DIR = project_root / "output"
@@ -91,6 +99,17 @@ except ImportError:
     spec.loader.exec_module(psd_analysis)
     analyze_psd = psd_analysis.analyze_psd
 
+# Photoshop 启动工具
+try:
+    from src.utils.photoshop_process import start_photoshop
+except ImportError:
+    import importlib.util
+    helper_path = Path(__file__).parent / "utils" / "photoshop_process.py"
+    spec = importlib.util.spec_from_file_location("ps_proc", helper_path)
+    ps_proc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ps_proc)
+    start_photoshop = ps_proc.start_photoshop
+
 # 创建 FastAPI 应用
 app = FastAPI(
     title="PSD 智能对象替换服务",
@@ -131,6 +150,9 @@ app = FastAPI(
         "defaultModelExpandDepth": 2,  # 默认展开模型深度
     }
 )
+
+# 挂载静态 UI（用于直接访问 Web 控制台）
+app.mount("/ui", StaticFiles(directory=STATIC_DIR, html=True), name="ui")
 
 
 # ========== 请求/响应模型 ==========
@@ -823,23 +845,35 @@ class PSDAnalysisResponse(BaseModel):
 
 # ========== API 路由 ==========
 
+@app.get("/", include_in_schema=False)
+async def ui_index():
+    """直接返回静态 UI 的入口页"""
+    index_file = STATIC_DIR / "index.html"
+    if index_file.exists():
+        return FileResponse(index_file)
+    return {
+        "message": "UI 文件未找到",
+        "expected": str(index_file),
+        "tips": "确认 src/ui/index.html 是否存在"
+    }
+
+
 @app.get(
-    "/",
+    "/service-info",
     tags=["基础"],
     summary="服务信息",
     description="获取服务基本信息和可用接口"
 )
-async def root():
+async def service_info():
     """
-    根路径 - 返回服务基本信息
-    
-    返回服务名称、版本和主要接口路径
+    服务信息 - 返回基本信息与主要接口路径
     """
     return {
         "service": "PSD 智能对象替换服务",
         "version": "1.0.0",
         "docs": "/docs",
         "health": "/health",
+        "ui": "/",
         "api": {
             "process": "/processPsd",
             "photoshopStatus": "/photoshopStatus",
@@ -1067,6 +1101,47 @@ async def get_photoshop_status(test_connection: bool = False):
             "traceback": traceback.format_exc()
         }
         raise HTTPException(status_code=500, detail=error_detail)
+
+
+@app.post(
+    "/startPhotoshop",
+    tags=["Photoshop"],
+    summary="启动 Photoshop（如果未运行）",
+    description="尝试启动 Photoshop，如果已运行则直接返回成功。"
+)
+async def start_photoshop_handler(timeout: int = 30):
+    """
+    启动 Photoshop：
+    - 如果已经运行，直接返回成功
+    - 如果未运行，尝试在 timeout 秒内启动
+    """
+    try:
+        ok = start_photoshop(timeout=timeout)
+        if not ok:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": "启动失败",
+                    "message": "未能在指定时间内启动 Photoshop，请确认安装路径或手动启动。"
+                }
+            )
+        return {
+            "success": True,
+            "message": "Photoshop 已运行或启动成功",
+            "timestamp": datetime.now().isoformat()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "启动 Photoshop 失败",
+                "message": str(e),
+                "traceback": traceback.format_exc()
+            }
+        )
 
 
 @app.post(
