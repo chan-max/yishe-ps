@@ -1435,6 +1435,331 @@ def process_psd_with_image(
         )
 
 
+def process_psd_with_image_multi(
+    psd_path: str | Path,
+    config: dict | None = None
+) -> Path:
+    """
+    封装函数：处理 PSD 套图，支持多个智能对象的不同配置
+    
+    Args:
+        psd_path: PSD 套图文件路径（字符串或 Path 对象）
+        config: 配置字典，必需参数：
+            - export_dir: 导出目录（必需）
+            - smart_objects_config: 智能对象配置数组（必需）
+                - 每个配置包含：
+                    - smart_object_name: 智能对象图层名称（可选）
+                    - image_path: 素材图片路径（必需）
+                    - resize_mode: 图片缩放模式（可选，默认 "contain"）
+                    - custom_options: 自定义模式配置（可选）
+                    - tile_size: 图片缩放分块尺寸（可选，默认 512）
+            - output_filename: 导出文件名（可选，默认使用 PSD 文件名_export.png）
+            - verbose: 是否显示详细信息（可选，默认 True）
+    
+    Returns:
+        导出的图片文件路径
+    
+    Example:
+        >>> config = {
+        ...     'export_dir': 'D:/output',
+        ...     'smart_objects_config': [
+        ...         {
+        ...             'smart_object_name': '左图',
+        ...             'image_path': 'D:/images/left.png',
+        ...             'resize_mode': 'custom',
+        ...             'custom_options': {...}
+        ...         },
+        ...         {
+        ...             'smart_object_name': '右图',
+        ...             'image_path': 'D:/images/right.png',
+        ...             'resize_mode': 'cover'
+        ...         }
+        ...     ]
+        ... }
+        >>> result = process_psd_with_image_multi(
+        ...     psd_path='D:/templates/template.psd',
+        ...     config=config
+        ... )
+    """
+    # 转换路径类型
+    psd_path = Path(psd_path)
+    
+    # 默认配置
+    default_config = {
+        'export_dir': None,  # 必需参数
+        'smart_objects_config': None,  # 必需参数
+        'output_filename': None,
+        'verbose': True
+    }
+    
+    # 合并配置
+    if config is None:
+        config = {}
+    
+    final_config = {**default_config, **config}
+    
+    # 验证必需参数
+    if final_config['export_dir'] is None:
+        raise ValueError("config['export_dir'] 是必需参数，请提供导出目录路径")
+    
+    if final_config['smart_objects_config'] is None or len(final_config['smart_objects_config']) == 0:
+        raise ValueError("config['smart_objects_config'] 是必需参数，且不能为空，请提供至少一个智能对象配置")
+    
+    export_dir = Path(final_config['export_dir'])
+    smart_objects_config = final_config['smart_objects_config']
+    
+    # 如果 verbose 为 False，临时禁用 print（通过重定向）
+    import io
+    import contextlib
+    
+    if not final_config['verbose']:
+        # 创建一个空的输出流来抑制打印
+        null_stream = io.StringIO()
+        with contextlib.redirect_stdout(null_stream), contextlib.redirect_stderr(null_stream):
+            return replace_and_export_psd_multi(
+                psd_path=psd_path,
+                export_dir=export_dir,
+                smart_objects_config=smart_objects_config,
+                output_filename=final_config['output_filename']
+            )
+    else:
+        return replace_and_export_psd_multi(
+            psd_path=psd_path,
+            export_dir=export_dir,
+            smart_objects_config=smart_objects_config,
+            output_filename=final_config['output_filename']
+        )
+
+
+def replace_and_export_psd_multi(
+    psd_path: Path,
+    export_dir: Path,
+    smart_objects_config: list[dict],
+    output_filename: Optional[str] = None
+) -> Path:
+    """
+    处理 PSD 文件，支持多个智能对象的不同配置
+    
+    Args:
+        psd_path: PSD 文件路径
+        export_dir: 导出目录
+        smart_objects_config: 智能对象配置数组
+        output_filename: 导出文件名（可选）
+    
+    Returns:
+        导出的图片文件路径
+    """
+    # 使用辅助函数创建 Session（带重试逻辑）
+    session = create_photoshop_session(max_retries=5, retry_delay=2)
+    
+    with session:
+        app = session.app
+        doc = app.open(str(psd_path))
+        
+        # 查找所有智能对象
+        all_smart_objects = find_smart_object_layers(doc, None, debug=False)
+        
+        if not all_smart_objects:
+            print("\n⚠️ 第一次查找未找到智能对象，启用详细调试模式重新查找...\n")
+            all_smart_objects = find_smart_object_layers(doc, None, debug=True)
+        
+        if not all_smart_objects:
+            doc.close()
+            raise ValueError("PSD 文件中没有找到任何智能对象图层")
+        
+        # ========== 打印 PSD 文件基本信息 ==========
+        print("\n" + "=" * 70)
+        print("📋 PSD 文件信息")
+        print("=" * 70)
+        print(f"文件路径: {psd_path}")
+        print(f"文件大小: {psd_path.stat().st_size / 1024 / 1024:.2f} MB")
+        print(f"文档名称: {doc.name}")
+        print(f"文档尺寸: {int(doc.width)} x {int(doc.height)} 像素")
+        print(f"分辨率: {int(doc.resolution)} DPI")
+        print(f"智能图层总数: {len(all_smart_objects)}")
+        print(f"配置数量: {len(smart_objects_config)}")
+        print("=" * 70)
+        
+        # ========== 匹配配置和智能对象 ==========
+        # 匹配策略：
+        # 1. 如果配置指定了 smart_object_name，优先按名称匹配
+        # 2. 如果配置未指定名称，按顺序匹配
+        # 3. 如果配置数量少于智能对象数量，复用配置
+        
+        matched_pairs = []  # [(smart_object, config), ...]
+        used_config_indices = set()  # 已使用的配置索引
+        used_smart_object_indices = set()  # 已使用的智能对象索引
+        
+        # 第一轮：按名称精确匹配
+        for config_idx, so_config in enumerate(smart_objects_config):
+            if so_config.get('smart_object_name'):
+                target_name = so_config['smart_object_name']
+                for so_idx, so in enumerate(all_smart_objects):
+                    if so_idx in used_smart_object_indices:
+                        continue
+                    if so['name'] == target_name:
+                        matched_pairs.append((so, so_config))
+                        used_config_indices.add(config_idx)
+                        used_smart_object_indices.add(so_idx)
+                        print(f"✅ 匹配: 智能对象 '{so['name']}' <-> 配置[{config_idx}]")
+                        break
+        
+        # 第二轮：按顺序匹配剩余的配置和智能对象
+        config_idx = 0
+        for so_idx, so in enumerate(all_smart_objects):
+            if so_idx in used_smart_object_indices:
+                continue
+            
+            # 找到下一个未使用的配置
+            while config_idx < len(smart_objects_config) and config_idx in used_config_indices:
+                config_idx += 1
+            
+            if config_idx < len(smart_objects_config):
+                so_config = smart_objects_config[config_idx]
+                matched_pairs.append((so, so_config))
+                used_config_indices.add(config_idx)
+                used_smart_object_indices.add(so_idx)
+                print(f"✅ 匹配: 智能对象 '{so['name']}' <-> 配置[{config_idx}] (按顺序)")
+                config_idx += 1
+            else:
+                # 配置用完了，复用第一个配置
+                if len(smart_objects_config) > 0:
+                    so_config = smart_objects_config[0]
+                    matched_pairs.append((so, so_config))
+                    used_smart_object_indices.add(so_idx)
+                    print(f"✅ 匹配: 智能对象 '{so['name']}' <-> 配置[0] (复用)")
+        
+        if not matched_pairs:
+            doc.close()
+            raise ValueError("未能匹配任何智能对象和配置")
+        
+        print(f"\n📊 匹配结果: 共匹配 {len(matched_pairs)} 个智能对象")
+        
+        # ========== 打印智能对象详细信息 ==========
+        print("\n" + "=" * 70)
+        print("🔗 智能对象处理计划")
+        print("=" * 70)
+        for i, (so, so_config) in enumerate(matched_pairs, 1):
+            print(f"\n  [{i}/{len(matched_pairs)}] {so['name']}")
+            print(f"      图层路径: {so['path']}")
+            print(f"      图片路径: {so_config['image_path']}")
+            print(f"      缩放模式: {so_config.get('resize_mode', 'contain')}")
+            print(f"      分块尺寸: {so_config.get('tile_size', 512)}")
+        print("=" * 70)
+        
+        # ========== 处理所有智能对象 ==========
+        print("\n" + "=" * 70)
+        print("🔄 开始处理")
+        print("=" * 70)
+        
+        processed_count = 0
+        for i, (so, so_config) in enumerate(matched_pairs, 1):
+            print(f"\n⏳ [{i}/{len(matched_pairs)}] 正在替换智能对象: {so['name']}...")
+            try:
+                image_path = Path(so_config['image_path'])
+                resize_mode = so_config.get('resize_mode', 'contain')
+                tile_size = so_config.get('tile_size', 512)
+                custom_options = so_config.get('custom_options')
+                
+                replace_smart_object_content(
+                    session,
+                    doc,
+                    so['layer'],
+                    image_path,
+                    export_dir,
+                    tile_size,
+                    resize_mode,
+                    custom_options
+                )
+                print(f"✅ [{i}/{len(matched_pairs)}] 智能对象 '{so['name']}' 已替换")
+                processed_count += 1
+                
+                # 确保回到主文档（每个替换操作后）
+                try:
+                    import time
+                    time.sleep(0.3)
+                    current_active = session.active_document
+                    if current_active != doc:
+                        doc.activeLayer = so['layer']
+                        print(f"    ✅ 已确保回到主文档")
+                except Exception as e:
+                    print(f"    ⚠️ 警告: 检查主文档时出错: {e}")
+                    
+            except Exception as e:
+                print(f"❌ [{i}/{len(matched_pairs)}] 处理智能对象 '{so['name']}' 时出错: {e}")
+                import traceback
+                traceback.print_exc()
+                # 继续处理下一个智能对象
+                continue
+        
+        print(f"\n✅ 处理完成: 成功处理 {processed_count}/{len(matched_pairs)} 个智能对象")
+        
+        # 确保活动文档是主文档
+        try:
+            import time
+            time.sleep(0.3)
+            current_active = session.active_document
+            if current_active != doc:
+                if matched_pairs:
+                    doc.activeLayer = matched_pairs[0][0]['layer']
+                    print(f"    ✅ 已激活主文档和目标图层")
+        except Exception as e:
+            print(f"    ⚠️ 警告: 检查活动文档时出错: {e}")
+        
+        # 导出图片
+        if output_filename is None:
+            output_filename = f"{psd_path.stem}_export.png"
+        
+        export_path = export_dir / output_filename
+        
+        # 检查导出路径的权限
+        print(f"\n⏳ 正在导出图片...")
+        has_permission, perm_error = check_write_permission(export_path)
+        if not has_permission:
+            print(f"\n    ❌ 权限检查失败: {perm_error}")
+            doc.close()
+            raise PermissionError(f"导出路径没有写入权限: {perm_error}")
+        
+        print(f"    ✅ 权限检查通过")
+        
+        try:
+            # 确保导出目录存在
+            export_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            options = session.ExportOptionsSaveForWeb()
+            print(f"    导出路径: {export_path}")
+            doc.exportDocument(
+                str(export_path),
+                exportAs=session.ExportType.SaveForWeb,
+                options=options
+            )
+            print(f"    ✅ 导出成功")
+        except Exception as e:
+            print(f"\n❌ 导出失败: {e}")
+            import traceback
+            traceback.print_exc()
+            doc.close()
+            raise
+        
+        print(f"\n" + "=" * 70)
+        print("✅ 处理完成")
+        print("=" * 70)
+        print(f"导出路径: {export_path}")
+        if export_path.exists():
+            print(f"文件大小: {export_path.stat().st_size / 1024 / 1024:.2f} MB")
+        print("=" * 70)
+        
+        # 关闭主文档
+        try:
+            doc.close()
+            print(f"主文档已关闭")
+        except Exception as e:
+            print(f"⚠️ 警告: 关闭主文档时出错: {e}")
+    
+    gc.collect()
+    return export_path
+
+
 def main():
     """主函数 - 可以通过命令行参数或直接修改代码中的路径来使用"""
     import argparse

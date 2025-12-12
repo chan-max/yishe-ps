@@ -70,7 +70,7 @@ def generate_unique_filename(original_filename: Optional[str], psd_path: Path) -
 
 # 导入功能模块
 try:
-    from src.psd_img_replace_smartobject import process_psd_with_image
+    from src.psd_img_replace_smartobject import process_psd_with_image, process_psd_with_image_multi
 except ImportError:
     # 如果相对导入失败，尝试绝对导入
     import importlib.util
@@ -79,6 +79,7 @@ except ImportError:
     psd_replace = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(psd_replace)
     process_psd_with_image = psd_replace.process_psd_with_image
+    process_psd_with_image_multi = psd_replace.process_psd_with_image_multi
 
 # 导入 Photoshop 状态检测服务
 try:
@@ -241,16 +242,179 @@ class CustomOptions(BaseModel):
     size: Size = Field(..., description="尺寸配置")
 
 
+class SmartObjectConfig(BaseModel):
+    """单个智能对象的配置"""
+    smart_object_name: Optional[str] = Field(
+        None,
+        description="智能对象图层名称（可选，不指定则按搜索顺序匹配）",
+        example="图片"
+    )
+    image_path: str = Field(
+        ...,
+        description="素材图片路径（支持 JPG/PNG/BMP/TIFF 格式）",
+        example=r"D:\images\image.jpg"
+    )
+    resize_mode: Optional[str] = Field(
+        None,
+        description="图片缩放模式（可选，未指定则使用 defaults.resize_mode）",
+        example="custom"
+    )
+    custom_options: Optional[CustomOptions] = Field(
+        None,
+        description="自定义模式配置（仅当 resize_mode='custom' 时必需）",
+        example=None
+    )
+    tile_size: Optional[int] = Field(
+        None,
+        ge=64,
+        le=2048,
+        description="图片缩放分块尺寸（可选，未指定则使用 defaults.tile_size）",
+        example=512
+    )
+    
+    @validator('image_path')
+    def validate_image(cls, v):
+        """验证图片文件路径格式（不检查文件是否存在，文件存在性检查在实际处理时进行）"""
+        path = Path(v)
+        valid_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif'}
+        if path.suffix.lower() not in valid_extensions:
+            raise ValueError(f"不支持的图片格式: {v}，支持的格式: {', '.join(valid_extensions)}")
+        # 只验证格式，不检查文件是否存在
+        # 返回原始路径字符串，让实际处理函数来处理路径解析
+        return v
+    
+    @validator('resize_mode')
+    def validate_resize_mode(cls, v):
+        """验证缩放模式"""
+        if v is None:
+            return v
+        valid_modes = {'stretch', 'contain', 'cover', 'custom'}
+        if v not in valid_modes:
+            raise ValueError(f"不支持的缩放模式: {v}，支持的模式: {', '.join(valid_modes)}")
+        return v
+    
+    @model_validator(mode='after')
+    def validate_custom_options(self):
+        """验证自定义模式配置"""
+        if self.resize_mode == 'custom':
+            if self.custom_options is None:
+                raise ValueError("当 resize_mode='custom' 时，custom_options 必须提供")
+        return self
+
+
+class DefaultOptions(BaseModel):
+    """全局默认配置"""
+    resize_mode: str = Field(
+        "contain",
+        description="默认图片缩放模式",
+        example="contain"
+    )
+    custom_options: Optional[CustomOptions] = Field(
+        None,
+        description="默认自定义模式配置（仅当 resize_mode='custom' 时有效）",
+        example=None
+    )
+    tile_size: int = Field(
+        512,
+        ge=64,
+        le=2048,
+        description="默认图片缩放分块尺寸",
+        example=512
+    )
+    
+    @validator('resize_mode')
+    def validate_resize_mode(cls, v):
+        """验证缩放模式"""
+        valid_modes = {'stretch', 'contain', 'cover', 'custom'}
+        if v not in valid_modes:
+            raise ValueError(f"不支持的缩放模式: {v}，支持的模式: {', '.join(valid_modes)}")
+        return v
+
+
 class ProcessRequest(BaseModel):
-    """处理请求模型"""
+    """处理请求模型（支持新旧两种格式）"""
     psd_path: str = Field(
         ...,
         description="PSD 套图文件路径",
         example=r"D:\templates\template.psd"
     )
-    image_path: str = Field(
-        ...,
-        description="素材图片路径（支持 JPG/PNG/BMP/TIFF 格式）",
+    # ========== 新格式：支持多个智能对象 ==========
+    smart_objects: Optional[list[SmartObjectConfig]] = Field(
+        None,
+        description="""
+        智能对象配置数组（新格式，推荐使用）
+        
+        **使用说明**：
+        - 如果提供了此字段，将使用新格式处理多个智能对象
+        - 每个智能对象可以单独配置图片路径、缩放模式等参数
+        - 如果数组只有一个配置，但 PSD 中有多个智能对象，会自动复用该配置
+        - 如果数组配置数量少于智能对象数量，会循环复用配置
+        
+        **配置复用规则**：
+        - 如果 smart_objects 数组只有 1 个配置，会复用给所有找到的智能对象
+        - 如果 smart_objects 数组有多个配置，按顺序匹配智能对象
+        - 如果某个智能对象指定了 smart_object_name，优先按名称匹配
+        
+        **示例**：
+        ```json
+        {
+          "smart_objects": [
+            {
+              "smart_object_name": "左图",
+              "image_path": "D:\\images\\left.png",
+              "resize_mode": "custom",
+              "custom_options": {...}
+            },
+            {
+              "smart_object_name": "右图",
+              "image_path": "D:\\images\\right.png",
+              "resize_mode": "cover"
+            }
+          ]
+        }
+        ```
+        """,
+        example=None
+    )
+    defaults: Optional[DefaultOptions] = Field(
+        None,
+        description="""
+        全局默认配置（仅当使用 smart_objects 时有效）
+        
+        **作用**：为 smart_objects 中的配置提供默认值
+        
+        **使用说明**：
+        - 如果 smart_objects 中某个配置未指定 resize_mode，使用 defaults.resize_mode
+        - 如果 smart_objects 中某个配置未指定 tile_size，使用 defaults.tile_size
+        - 如果 smart_objects 中某个配置未指定 custom_options，使用 defaults.custom_options
+        
+        **示例**：
+        ```json
+        {
+          "defaults": {
+            "resize_mode": "contain",
+            "tile_size": 512
+          },
+          "smart_objects": [
+            {
+              "image_path": "D:\\images\\img1.png"
+              // resize_mode 和 tile_size 会使用 defaults 中的值
+            }
+          ]
+        }
+        ```
+        """,
+        example=None
+    )
+    # ========== 旧格式：向后兼容（单个智能对象） ==========
+    image_path: Optional[str] = Field(
+        None,
+        description="""
+        素材图片路径（旧格式，向后兼容）
+        
+        **注意**：如果提供了 smart_objects，此字段会被忽略
+        如果未提供 smart_objects，则使用此字段（旧格式）
+        """,
         example=r"D:\images\image.jpg"
     )
     export_dir: Optional[str] = Field(
@@ -439,145 +603,61 @@ class ProcessRequest(BaseModel):
     
     class Config:
         json_schema_extra = {
-            "example": {
-                "psd_path": r"D:\freepik\鼠标垫单个\waterproof-desk-mat-mockup-top-view.psd",
-                "image_path": r"D:\workspace\yishe-ps\examples\paint.jpg",
-                "export_dir": None,
-                "smart_object_name": None,
-                "output_filename": "result.png",
-                "tile_size": 512,
-                "resize_mode": "contain",
-                "custom_options": None,
-                "verbose": True
-            },
-            "examples": [
-                {
-                    "psd_path": r"D:\freepik\鼠标垫单个\waterproof-desk-mat-mockup-top-view.psd",
-                    "image_path": r"D:\workspace\yishe-ps\examples\paint.jpg",
-                    "export_dir": None,
-                    "smart_object_name": None,
-                    "output_filename": None,
-                    "tile_size": 512,
-                    "resize_mode": "custom",
-                    "custom_options": {
-                        "position": {
-                            "x": 100,
-                            "y": 50,
-                            "unit": "px"
-                        },
-                        "size": {
-                            "width": 800,
-                            "height": 600,
-                            "unit": "px",
-                            "maintain_aspect_ratio": False
+            "example":  {
+                            "defaults": {
+                            "resize_mode": "contain",
+                            "tile_size": 512
+                            },
+                            "output_filename": "result.png",
+                            "psd_path": "D:\\freepik\\双相框可用\\7484117.psd",
+                            "smart_objects": [
+                            {
+                                "custom_options": {
+                                "position": {
+                                    "unit": "px",
+                                    "x": 100,
+                                    "y": 50
+                                },
+                                "size": {
+                                    "height": 600,
+                                    "maintain_aspect_ratio": False,
+                                    "unit": "px",
+                                    "width": 800
+                                }
+                                },
+                                "image_path": "D:\\workspace\\yishe-ps\\examples\\re.jpg",
+                                "resize_mode": "custom",
+                                "smart_object_name": "左图",
+                                "tile_size": 512
+                            },
+                            {
+                                "image_path": "D:\\workspace\\yishe-ps\\examples\\sq.jpg",
+                                "resize_mode": "cover",
+                                "smart_object_name": "右图",
+                                "tile_size": 1024
+                            }
+                            ],
+                            "verbose": True
                         }
-                    },
-                    "verbose": True
-                },
-                {
-                    "psd_path": r"D:\freepik\鼠标垫单个\waterproof-desk-mat-mockup-top-view.psd",
-                    "image_path": r"D:\workspace\yishe-ps\examples\paint.jpg",
-                    "export_dir": None,
-                    "smart_object_name": None,
-                    "output_filename": None,
-                    "tile_size": 512,
-                    "resize_mode": "custom",
-                    "custom_options": {
-                        "position": {
-                            "x": 100,
-                            "y": 50,
-                            "unit": "px"
-                        },
-                        "size": {
-                            "width": 800,
-                            "height": 600,
-                            "unit": "px",
-                            "maintain_aspect_ratio": False
-                        }
-                    },
-                    "verbose": True
-                },
-                {
-                    "psd_path": r"D:\freepik\鼠标垫单个\waterproof-desk-mat-mockup-top-view.psd",
-                    "image_path": r"D:\workspace\yishe-ps\examples\paint.jpg",
-                    "export_dir": None,
-                    "smart_object_name": None,
-                    "output_filename": None,
-                    "tile_size": 512,
-                    "resize_mode": "custom",
-                    "custom_options": {
-                        "position": {
-                            "x": 10,
-                            "y": 10,
-                            "unit": "%"
-                        },
-                        "size": {
-                            "width": 80,
-                            "height": 80,
-                            "unit": "%",
-                            "maintain_aspect_ratio": True,
-                            "aspect_ratio_base": "width"
-                        }
-                    },
-                    "verbose": True
-                },
-                {
-                    "psd_path": r"D:\freepik\鼠标垫单个\waterproof-desk-mat-mockup-top-view.psd",
-                    "image_path": r"D:\workspace\yishe-ps\examples\paint.jpg",
-                    "export_dir": None,
-                    "smart_object_name": None,
-                    "output_filename": None,
-                    "tile_size": 512,
-                    "resize_mode": "custom",
-                    "custom_options": {
-                        "position": {
-                            "x": 0,
-                            "y": 0,
-                            "unit": "px"
-                        },
-                        "size": {
-                            "width": 800,
-                            "height": 600,
-                            "unit": "px",
-                            "maintain_aspect_ratio": True,
-                            "aspect_ratio_base": "width"
-                        }
-                    },
-                    "verbose": True
-                },
-                {
-                    "psd_path": r"D:\freepik\鼠标垫单个\waterproof-desk-mat-mockup-top-view.psd",
-                    "image_path": r"D:\workspace\yishe-ps\examples\paint.jpg",
-                    "export_dir": None,
-                    "smart_object_name": None,
-                    "output_filename": None,
-                    "tile_size": 512,
-                    "resize_mode": "custom",
-                    "custom_options": {
-                        "position": {
-                            "x": 0,
-                            "y": 0,
-                            "unit": "px"
-                        },
-                        "size": {
-                            "width": 800,
-                            "height": 600,
-                            "unit": "px",
-                            "maintain_aspect_ratio": True,
-                            "aspect_ratio_base": "height"
-                        }
-                    },
-                    "verbose": True
-                }
-            ]
         }
     
-    @validator('psd_path', 'image_path')
-    def validate_paths(cls, v):
-        """验证文件路径是否存在"""
+    @validator('psd_path')
+    def validate_psd_path_exists(cls, v):
+        """验证 PSD 文件路径是否存在"""
         path = Path(v)
         if not path.exists():
-            raise ValueError(f"路径不存在: {v}")
+            raise ValueError(f"PSD 文件路径不存在: {v}")
+        return str(path.absolute())
+    
+    @validator('image_path')
+    def validate_image_path(cls, v):
+        """验证图片文件路径（仅当使用旧格式时，v 不为 None）"""
+        # 如果 v 为 None，说明使用新格式，跳过验证
+        if v is None:
+            return v
+        path = Path(v)
+        if not path.exists():
+            raise ValueError(f"图片文件路径不存在: {v}")
         return str(path.absolute())
     
     @validator('export_dir')
@@ -640,6 +720,25 @@ class ProcessRequest(BaseModel):
             if self.custom_options is None:
                 raise ValueError("当 resize_mode='custom' 时，custom_options 必须提供")
         # 非 custom 模式时，custom_options 会被忽略，允许为 None 或提供
+        
+        return self
+    
+    @model_validator(mode='after')
+    def validate_request_format(self):
+        """验证请求格式：确保新旧格式的兼容性"""
+        # 如果提供了 smart_objects，使用新格式
+        if self.smart_objects is not None:
+            if len(self.smart_objects) == 0:
+                raise ValueError("smart_objects 数组不能为空，至少需要提供一个配置")
+            # 新格式：确保 defaults 的 resize_mode 和 custom_options 匹配
+            if self.defaults and self.defaults.resize_mode == 'custom':
+                if self.defaults.custom_options is None:
+                    raise ValueError("当 defaults.resize_mode='custom' 时，defaults.custom_options 必须提供")
+            return self
+        
+        # 如果未提供 smart_objects，使用旧格式，必须提供 image_path
+        if self.image_path is None:
+            raise ValueError("必须提供 image_path（旧格式）或 smart_objects（新格式）之一")
         
         return self
 
@@ -909,26 +1008,54 @@ async def health_check():
     "/processPsd",
     response_model=ProcessResponse,
     tags=["处理"],
-    summary="处理单个 PSD 文件",
+    summary="处理 PSD 文件（支持单个或多个智能对象）",
     description="""
     替换 PSD 中的智能对象并导出图片。
     
+    **支持两种格式**：
+    
+    ### 1. 旧格式（向后兼容）：单个智能对象
+    使用 `image_path`、`resize_mode` 等字段，适用于单个智能对象的场景。
+    
+    ### 2. 新格式（推荐）：多个智能对象
+    使用 `smart_objects` 数组，支持为每个智能对象单独配置参数。
+    
     **处理流程**：
     1. 打开 PSD 文件
-    2. 查找智能对象图层（如果指定了名称则查找匹配的，否则使用第一个找到的）
-    3. 打开智能对象文档
-    4. 缩放素材图片适配智能对象尺寸
-    5. 替换智能对象内容
-    6. 保存并关闭智能对象文档
-    7. 导出主文档为 PNG 图片
+    2. 查找智能对象图层
+    3. 匹配配置和智能对象（按名称或按顺序）
+    4. 逐个处理每个智能对象：
+       - 打开智能对象文档
+       - 缩放素材图片适配智能对象尺寸
+       - 替换智能对象内容
+       - 保存并关闭智能对象文档
+    5. 导出主文档为 PNG 图片
+    
+    **新格式配置复用规则**：
+    - 如果 `smart_objects` 数组只有 1 个配置，会复用给所有找到的智能对象
+    - 如果 `smart_objects` 数组有多个配置，按顺序匹配智能对象
+    - 如果某个配置指定了 `smart_object_name`，优先按名称匹配
+    - 如果配置数量少于智能对象数量，会循环复用配置
     
     **参数说明**：
+    
+    **新格式参数**（推荐）：
+    - `smart_objects`: 智能对象配置数组（必需，当使用新格式时）
+      - 每个配置包含：`smart_object_name`（可选）、`image_path`（必需）、`resize_mode`（可选）、`custom_options`（可选）、`tile_size`（可选）
+    - `defaults`: 全局默认配置（可选）
+      - 当 `smart_objects` 中某个配置未指定参数时，使用此默认值
+    
+    **旧格式参数**（向后兼容）：
+    - `image_path`: 素材图片路径（必需，当使用旧格式时）
+    - `resize_mode`: 图片缩放模式（可选，默认 "contain"）
+    - `custom_options`: 自定义模式配置（可选）
+    - `tile_size`: 图片缩放分块尺寸（可选，默认512）
+    - `smart_object_name`: 智能对象图层名称（可选）
+    
+    **通用参数**：
     - `psd_path`: PSD 套图文件路径（必需）
-    - `image_path`: 素材图片路径（必需，支持 JPG/PNG/BMP/TIFF）
     - `export_dir`: 导出目录路径（可选，不指定则使用服务启动文件同级目录下的 output 目录）
-    - `smart_object_name`: 智能对象图层名称（可选，不指定则替换第一个找到的）
     - `output_filename`: 导出文件名（可选，默认使用 `PSD文件名_export.png`）。注意：实际文件名会自动添加时间戳以确保唯一性，防止文件被覆盖
-    - `tile_size`: 图片缩放分块尺寸（可选，64-2048，默认512，用于处理大图片）
     - `verbose`: 是否显示详细信息（可选，默认true）
     
     **返回数据**：
@@ -937,6 +1064,51 @@ async def health_check():
     - `export_dir`: 导出目录
     - `file_size`: 文件大小（字节）
     - `file_size_mb`: 文件大小（MB）
+    
+    **使用示例**：
+    
+    1. **旧格式**（单个智能对象）：
+    ```json
+    {
+      "psd_path": "D:\\template.psd",
+      "image_path": "D:\\image.jpg",
+      "resize_mode": "contain"
+    }
+    ```
+    
+    2. **新格式**（多个智能对象，每个单独配置）：
+    ```json
+    {
+      "psd_path": "D:\\template.psd",
+      "smart_objects": [
+        {
+          "smart_object_name": "左图",
+          "image_path": "D:\\left.jpg",
+          "resize_mode": "custom",
+          "custom_options": {...}
+        },
+        {
+          "smart_object_name": "右图",
+          "image_path": "D:\\right.jpg",
+          "resize_mode": "cover"
+        }
+      ]
+    }
+    ```
+    
+    3. **新格式**（单个配置复用给所有智能对象）：
+    ```json
+    {
+      "psd_path": "D:\\template.psd",
+      "smart_objects": [
+        {
+          "image_path": "D:\\image.jpg",
+          "resize_mode": "custom",
+          "custom_options": {...}
+        }
+      ]
+    }
+    ```
     """,
     response_description="处理结果，包含导出文件路径和相关信息"
 )
@@ -959,26 +1131,72 @@ async def process_psd(request: ProcessRequest):
         psd_path_obj = Path(request.psd_path)
         unique_filename = generate_unique_filename(request.output_filename, psd_path_obj)
         
-        # 构建配置
-        config = {
-            'export_dir': export_dir,
-            'smart_object_name': request.smart_object_name,
-            'output_filename': unique_filename,
-            'tile_size': request.tile_size,
-            'resize_mode': request.resize_mode,
-            'verbose': request.verbose
-        }
-        
-        # 如果使用自定义模式，添加 custom_options
-        if request.resize_mode == 'custom' and request.custom_options:
-            config['custom_options'] = request.custom_options.dict()
-        
-        # 调用处理函数
-        export_path = process_psd_with_image(
-            psd_path=request.psd_path,
-            image_path=request.image_path,
-            config=config
-        )
+        # 判断使用新格式还是旧格式
+        if request.smart_objects is not None:
+            # ========== 新格式：多个智能对象 ==========
+            # 准备默认配置
+            default_resize_mode = "contain"
+            default_tile_size = 512
+            default_custom_options = None
+            
+            if request.defaults:
+                default_resize_mode = request.defaults.resize_mode
+                default_tile_size = request.defaults.tile_size
+                if request.defaults.custom_options:
+                    default_custom_options = request.defaults.custom_options.dict()
+            
+            # 转换 smart_objects 配置为处理函数需要的格式
+            smart_objects_config = []
+            for so_config in request.smart_objects:
+                so_dict = {
+                    'smart_object_name': so_config.smart_object_name,
+                    'image_path': so_config.image_path,
+                    'resize_mode': so_config.resize_mode or default_resize_mode,
+                    'tile_size': so_config.tile_size or default_tile_size,
+                }
+                # 处理 custom_options
+                if so_config.resize_mode == 'custom' and so_config.custom_options:
+                    so_dict['custom_options'] = so_config.custom_options.dict()
+                elif so_dict['resize_mode'] == 'custom' and default_custom_options:
+                    so_dict['custom_options'] = default_custom_options
+                
+                smart_objects_config.append(so_dict)
+            
+            # 构建配置
+            config = {
+                'export_dir': export_dir,
+                'output_filename': unique_filename,
+                'verbose': request.verbose,
+                'smart_objects_config': smart_objects_config  # 新格式：传递配置数组
+            }
+            
+            # 调用处理函数（新格式）
+            export_path = process_psd_with_image_multi(
+                psd_path=request.psd_path,
+                config=config
+            )
+        else:
+            # ========== 旧格式：单个智能对象（向后兼容） ==========
+            # 构建配置
+            config = {
+                'export_dir': export_dir,
+                'smart_object_name': request.smart_object_name,
+                'output_filename': unique_filename,
+                'tile_size': request.tile_size,
+                'resize_mode': request.resize_mode,
+                'verbose': request.verbose
+            }
+            
+            # 如果使用自定义模式，添加 custom_options
+            if request.resize_mode == 'custom' and request.custom_options:
+                config['custom_options'] = request.custom_options.dict()
+            
+            # 调用处理函数（旧格式）
+            export_path = process_psd_with_image(
+                psd_path=request.psd_path,
+                image_path=request.image_path,
+                config=config
+            )
         
         # 构建响应数据
         response_data = {
