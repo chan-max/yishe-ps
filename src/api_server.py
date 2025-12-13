@@ -101,7 +101,7 @@ except ImportError:
 
 # Photoshop 启动工具
 try:
-    from src.utils.photoshop_process import start_photoshop
+    from src.utils.photoshop_process import start_photoshop, close_photoshop_process, restart_photoshop, is_photoshop_running
 except ImportError:
     import importlib.util
     helper_path = Path(__file__).parent / "utils" / "photoshop_process.py"
@@ -109,6 +109,9 @@ except ImportError:
     ps_proc = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(ps_proc)
     start_photoshop = ps_proc.start_photoshop
+    close_photoshop_process = ps_proc.close_photoshop_process
+    restart_photoshop = ps_proc.restart_photoshop
+    is_photoshop_running = ps_proc.is_photoshop_running
 
 # 创建 FastAPI 应用
 app = FastAPI(
@@ -1138,6 +1141,96 @@ async def start_photoshop_handler(timeout: int = 30):
             status_code=500,
             detail={
                 "error": "启动 Photoshop 失败",
+                "message": str(e),
+                "traceback": traceback.format_exc()
+            }
+        )
+
+
+@app.post(
+    "/stopPhotoshop",
+    tags=["Photoshop"],
+    summary="关闭 Photoshop",
+    description="关闭正在运行的 Photoshop 进程。"
+)
+async def stop_photoshop_handler(force: bool = False):
+    """
+    关闭 Photoshop：
+    - force=False：优雅关闭（terminate），等待进程正常退出
+    - force=True：强制关闭（kill），立即终止进程
+    """
+    try:
+        if not is_photoshop_running():
+            return {
+                "success": True,
+                "message": "Photoshop 未运行",
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        ok = close_photoshop_process(force=force)
+        if not ok:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": "关闭失败",
+                    "message": "无法关闭 Photoshop 进程，请检查权限。"
+                }
+            )
+        return {
+            "success": True,
+            "message": "Photoshop 已关闭",
+            "timestamp": datetime.now().isoformat()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "关闭 Photoshop 失败",
+                "message": str(e),
+                "traceback": traceback.format_exc()
+            }
+        )
+
+
+@app.post(
+    "/restartPhotoshop",
+    tags=["Photoshop"],
+    summary="重启 Photoshop",
+    description="先关闭 Photoshop（如果正在运行），然后重新启动。"
+)
+async def restart_photoshop_handler(timeout: int = 30):
+    """
+    重启 Photoshop：
+    - 先关闭正在运行的 Photoshop
+    - 然后重新启动 Photoshop
+    - 如果未运行，直接启动
+    """
+    try:
+        ok = restart_photoshop(timeout=timeout)
+        if not ok:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": "重启失败",
+                    "message": "未能在指定时间内重启 Photoshop，请确认安装路径或手动启动。"
+                }
+            )
+        return {
+            "success": True,
+            "message": "Photoshop 重启成功",
+            "timestamp": datetime.now().isoformat()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "重启 Photoshop 失败",
                 "message": str(e),
                 "traceback": traceback.format_exc()
             }

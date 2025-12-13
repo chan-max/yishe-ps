@@ -274,7 +274,7 @@
               <label>
                 端点速查
                 <div class="muted">
-                  /health · /photoshopStatus · /analyzePsd · /processPsd · /startPhotoshop
+                  /health · /photoshopStatus · /analyzePsd · /processPsd · /startPhotoshop · /stopPhotoshop · /restartPhotoshop
                 </div>
               </label>
               <label>
@@ -288,6 +288,12 @@
               </button>
               <button @click="startPhotoshop" :disabled="state.loading.startPs">
                 {{ state.loading.startPs ? '启动中...' : '启动 Photoshop' }}
+              </button>
+              <button @click="stopPhotoshop" :disabled="state.loading.stopPs" style="background: #dc2626;">
+                {{ state.loading.stopPs ? '关闭中...' : '关闭 Photoshop' }}
+              </button>
+              <button @click="restartPhotoshop" :disabled="state.loading.restartPs" style="background: #6b7280;">
+                {{ state.loading.restartPs ? '重启中...' : '重启 Photoshop' }}
               </button>
               <button @click="checkPhotoshop" :disabled="state.loading.checkPs">
                 {{ state.loading.checkPs ? '检测中...' : '检测 Photoshop 状态' }}
@@ -313,6 +319,8 @@
             <div class="muted" style="margin-bottom:8px;">先启动再检测；若多次失败，请检查安装路径或以管理员运行。</div>
             <div class="actions">
               <button @click="startPhotoshop">启动 Photoshop</button>
+              <button @click="stopPhotoshop" style="background: #dc2626;">关闭 Photoshop</button>
+              <button @click="restartPhotoshop" style="background: #6b7280;">重启 Photoshop</button>
               <button @click="checkPhotoshop">检测 Photoshop 状态</button>
             </div>
           </div>
@@ -438,6 +446,8 @@
           loading: {
             health: false,
             startPs: false,
+            stopPs: false,
+            restartPs: false,
             checkPs: false,
             analyze: false,
             process: false
@@ -527,6 +537,48 @@
           }
         }
 
+        async function stopPhotoshop() {
+          if (!confirm('确认关闭 Photoshop 吗？')) {
+            return;
+          }
+          state.loading.stopPs = true;
+          try {
+            const { data } = await client().post('/stopPhotoshop', null, {
+              params: { force: false }
+            });
+            state.lastLog = pretty(data);
+            // 关闭后自动检查状态
+            setTimeout(() => {
+              checkPhotoshop();
+            }, 1000);
+          } catch (e) {
+            state.lastLog = `关闭 Photoshop 失败:\n${pretty(e.response?.data || e.message)}`;
+          } finally {
+            state.loading.stopPs = false;
+          }
+        }
+
+        async function restartPhotoshop() {
+          if (!confirm('确认重启 Photoshop 吗？重启将关闭当前 Photoshop 并重新启动。')) {
+            return;
+          }
+          state.loading.restartPs = true;
+          try {
+            const { data } = await client().post('/restartPhotoshop', null, {
+              params: { timeout: state.startTimeout }
+            });
+            state.lastLog = pretty(data);
+            // 重启后自动检查状态
+            setTimeout(() => {
+              checkPhotoshop();
+            }, 3000);
+          } catch (e) {
+            state.lastLog = `重启 Photoshop 失败:\n${pretty(e.response?.data || e.message)}`;
+          } finally {
+            state.loading.restartPs = false;
+          }
+        }
+
         async function analyzePsd() {
           state.analyze.psd_path = normalizePath(state.analyze.psd_path || '');
           if (!state.analyze.psd_path) {
@@ -590,7 +642,9 @@
           analyzePsd,
           processPsd,
           goSection,
-          startPhotoshop
+          startPhotoshop,
+          stopPhotoshop,
+          restartPhotoshop
         };
       }
     }).mount('#app');
