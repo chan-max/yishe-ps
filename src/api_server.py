@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, validator, model_validator
@@ -1115,7 +1115,7 @@ async def health_check():
     """,
     response_description="处理结果，包含导出文件路径和相关信息"
 )
-async def process_psd(request: ProcessRequest):
+async def process_psd(request: ProcessRequest, response: Response):
     """
     处理 PSD 文件：替换智能对象并导出
     
@@ -1209,6 +1209,11 @@ async def process_psd(request: ProcessRequest):
             'file_size': export_path.stat().st_size if export_path.exists() else 0,
             'file_size_mb': round(export_path.stat().st_size / 1024 / 1024, 2) if export_path.exists() else 0
         }
+        
+        # 设置缓存控制头，避免 Swagger UI 显示旧结果
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
         
         return ProcessResponse(
             success=True,
