@@ -1582,27 +1582,34 @@ def replace_and_export_psd_multi(
         
         # ========== 匹配配置和智能对象 ==========
         # 匹配策略：
-        # 1. 如果配置指定了 smart_object_name，优先按名称匹配
-        # 2. 如果配置未指定名称，按顺序匹配
+        # 1. 如果配置指定了 smart_object_name，优先按名称模糊匹配（PS中的名字包含参数中的关键字即可）
+        # 2. 如果名称无法匹配，再按顺序匹配
         # 3. 如果配置数量少于智能对象数量，复用配置
         
         matched_pairs = []  # [(smart_object, config), ...]
         used_config_indices = set()  # 已使用的配置索引
         used_smart_object_indices = set()  # 已使用的智能对象索引
         
-        # 第一轮：按名称精确匹配
+        # 第一轮：按名称模糊匹配（包含关键字即可，不区分大小写）
         for config_idx, so_config in enumerate(smart_objects_config):
             if so_config.get('smart_object_name'):
-                target_name = so_config['smart_object_name']
+                target_keyword = so_config['smart_object_name'].strip()
+                matched = False
                 for so_idx, so in enumerate(all_smart_objects):
                     if so_idx in used_smart_object_indices:
                         continue
-                    if so['name'] == target_name:
+                    # 模糊匹配：PS中的名字包含参数中的关键字（不区分大小写）
+                    so_name = so['name']
+                    if target_keyword.lower() in so_name.lower():
                         matched_pairs.append((so, so_config))
                         used_config_indices.add(config_idx)
                         used_smart_object_indices.add(so_idx)
-                        print(f"✅ 匹配: 智能对象 '{so['name']}' <-> 配置[{config_idx}]")
+                        print(f"✅ 匹配: 智能对象 '{so_name}' <-> 配置[{config_idx}] (关键字: '{target_keyword}')")
+                        matched = True
                         break
+                
+                if not matched:
+                    print(f"⚠️  警告: 配置[{config_idx}] 的关键字 '{target_keyword}' 未匹配到任何智能对象，将按顺序匹配")
         
         # 第二轮：按顺序匹配剩余的配置和智能对象
         config_idx = 0
@@ -1619,7 +1626,11 @@ def replace_and_export_psd_multi(
                 matched_pairs.append((so, so_config))
                 used_config_indices.add(config_idx)
                 used_smart_object_indices.add(so_idx)
-                print(f"✅ 匹配: 智能对象 '{so['name']}' <-> 配置[{config_idx}] (按顺序)")
+                # 检查配置是否指定了名称但未匹配到
+                if so_config.get('smart_object_name'):
+                    print(f"✅ 匹配: 智能对象 '{so['name']}' <-> 配置[{config_idx}] (按顺序，配置中的关键字 '{so_config['smart_object_name']}' 未匹配到)")
+                else:
+                    print(f"✅ 匹配: 智能对象 '{so['name']}' <-> 配置[{config_idx}] (按顺序)")
                 config_idx += 1
             else:
                 # 配置用完了，复用第一个配置

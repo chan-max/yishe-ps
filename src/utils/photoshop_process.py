@@ -135,14 +135,67 @@ def ensure_photoshop_running(auto_start: bool = True, timeout: int = 30) -> bool
     return start_photoshop(timeout)
 
 
-def close_photoshop_process() -> None:
-    """关闭残留的 Photoshop 进程，以免影响后续任务。"""
+def close_photoshop_process(force: bool = False) -> bool:
+    """关闭 Photoshop 进程。
+    
+    Args:
+        force: 是否强制关闭（kill），默认 False（优雅关闭 terminate）
+        
+    Returns:
+        如果成功关闭或未运行返回 True，否则返回 False
+    """
+    found = False
     for proc in psutil.process_iter(attrs=["pid", "name"]):
         try:
             if "Photoshop" in proc.info["name"]:
-                proc.terminate()
+                found = True
+                if force:
+                    proc.kill()
+                else:
+                    proc.terminate()
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             continue
+    
+    if not found:
+        return True  # 未运行也算成功
+    
+    # 等待进程关闭
+    if not force:
+        try:
+            for proc in psutil.process_iter(attrs=["pid", "name"]):
+                try:
+                    if "Photoshop" in proc.info["name"]:
+                        proc.wait(timeout=10)
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, psutil.TimeoutExpired):
+                    continue
+        except Exception:
+            pass
+    
+    return True
+
+
+def restart_photoshop(timeout: int = 30) -> bool:
+    """重启 Photoshop。
+    
+    Args:
+        timeout: 启动超时时间（秒），默认 30 秒
+        
+    Returns:
+        如果成功重启返回 True，否则返回 False
+    """
+    # 先关闭
+    if is_photoshop_running():
+        print("正在关闭 Photoshop...")
+        close_photoshop_process(force=False)
+        # 等待进程完全关闭
+        for _ in range(10):
+            time.sleep(1)
+            if not is_photoshop_running():
+                break
+    
+    # 再启动
+    print("正在启动 Photoshop...")
+    return start_photoshop(timeout)
 
 
 def create_photoshop_session(max_retries: int = 5, retry_delay: int = 2):
