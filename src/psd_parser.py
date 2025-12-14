@@ -2,11 +2,23 @@
 使用 psd-tools 解析 PSD 文件并导出为 JSON
 """
 import json
+import sys
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from psd_tools import PSDImage
 from psd_tools.api.layers import Layer, PixelLayer, Group, TypeLayer, SmartObjectLayer
 from psd_tools.constants import BlendMode
+
+# 设置标准输出和错误输出为 UTF-8 编码，避免 Windows GBK 编码问题
+if sys.platform == 'win32':
+    # 重新配置标准输出和错误输出为 UTF-8
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    if hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    # 设置环境变量
+    os.environ['PYTHONIOENCODING'] = 'utf-8'
 
 
 def extract_layer_info(layer: Layer, parent_path: str = "") -> Dict[str, Any]:
