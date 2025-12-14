@@ -12,6 +12,7 @@ from datetime import datetime
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, validator, model_validator
 import uvicorn
 
@@ -150,6 +151,25 @@ app = FastAPI(
         "defaultModelsExpandDepth": 2,  # 默认展开模型深度
         "defaultModelExpandDepth": 2,  # 默认展开模型深度
     }
+)
+
+# 配置 CORS 中间件
+# 注意：如果 allow_credentials=True，不能使用 allow_origins=["*"]
+# 必须明确列出允许的来源
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",  # Vite 开发服务器
+        "http://localhost:5174",  # Vite 备用端口
+        "http://localhost:3000",  # 其他可能的开发服务器
+        "http://localhost:1519",  # 本地客户端
+        "http://localhost:1520",  # 主服务器
+        "https://1s.design:1520",  # 生产服务器
+    ],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],  # 明确指定允许的方法
+    allow_headers=["*"],  # 允许所有请求头
+    expose_headers=["*"],  # 暴露所有响应头
 )
 
 # 挂载静态 UI（用于直接访问 Web 控制台）
