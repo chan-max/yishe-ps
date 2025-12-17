@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  yishe-ps:
+    # 使用 DockerHub 上的镜像（推荐）
+    image: your-username/yishe-ps:latest
+    # 或者本地构建
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+    container_name: yishe-ps
+    ports:
+      - "1595:1595"
+    volumes:
+      # 挂载输出目录
+      - ./output:C:\app\output
+      # 挂载示例文件
+      - ./examples:C:\app\examples
+      # 如果需要使用主机的 Photoshop（可选）
+      # - C:\Program Files\Adobe:C:\Program Files\Adobe
+    environment:
+      - PYTHONIOENCODING=utf-8
+      - PYTHONUNBUFFERED=1
+      - HOST=0.0.0.0
+      - PORT=1595
+    restart: unless-stopped
+    # Windows 容器需要指定平台
+    platform: windows/amd64
+

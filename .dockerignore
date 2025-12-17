@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+
+# 构建和分发
+build/
+dist/
+*.egg-info/
+*.spec
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# 输出文件
+output/
+*.pid
+
+# 文档
+*.md
+!readme.md
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
