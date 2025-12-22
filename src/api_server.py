@@ -1235,34 +1235,123 @@ async def process_psd(request: ProcessRequest, response: Response):
             )
         else:
             # ========== 旧格式：单个智能对象（向后兼容） ==========
-            # 构建配置
-            config = {
-                'export_dir': export_dir,
+            # 将旧格式转换为新格式，统一使用 process_psd_with_image_multi
+            print(f"📋 检测到旧格式请求，转换为新格式并使用 process_psd_with_image_multi")
+            
+            # 构建单个智能对象的配置
+            smart_object_config = {
                 'smart_object_name': request.smart_object_name,
-                'output_filename': unique_filename,
-                'tile_size': request.tile_size,
+                'image_path': request.image_path,
                 'resize_mode': request.resize_mode,
-                'verbose': request.verbose
+                'tile_size': request.tile_size,
             }
             
             # 如果使用自定义模式，添加 custom_options
             if request.resize_mode == 'custom' and request.custom_options:
-                config['custom_options'] = request.custom_options.dict()
+                smart_object_config['custom_options'] = request.custom_options.dict()
             
-            # 调用处理函数（旧格式）
-            export_path = process_psd_with_image(
+            # 构建新格式的配置
+            config = {
+                'export_dir': export_dir,
+                'output_filename': unique_filename,
+                'verbose': request.verbose,
+                'smart_objects_config': [smart_object_config]  # 转换为数组格式
+            }
+            
+            # 统一使用 process_psd_with_image_multi（默认方法）
+            export_path = process_psd_with_image_multi(
                 psd_path=request.psd_path,
-                image_path=request.image_path,
                 config=config
             )
         
         # 构建响应数据
+        # 统一返回 export_files 数组格式，不管有没有画板
+        # 重要：固定返回和分析出的画板一样数量的文件
+        export_files = []
+        
+        # 先分析 PSD 获取画板数量
+        expected_count = 1  # 默认1个（没有画板的情况）
+        try:
+            from src.services.psd_analysis_service import analyze_psd
+            analysis_result = analyze_psd(str(request.psd_path))
+            if analysis_result and 'statistics' in analysis_result:
+                artboard_count = analysis_result['statistics'].get('artboard_count', 0)
+                if artboard_count > 0:
+                    expected_count = artboard_count
+                    print(f"📊 API层: 分析出 {artboard_count} 个画板，将返回 {artboard_count} 个文件")
+        except Exception as e:
+            print(f"⚠️ API层: 分析PSD获取画板数量时出错: {e}")
+        
+        # export_path 现在统一返回列表
+        if isinstance(export_path, list):
+            # 处理列表中的每个路径（可能包含 None）
+            for i, path in enumerate(export_path):
+                if path and path.exists():
+                    # 成功导出的文件
+                    export_files.append({
+                        'export_path': str(path),
+                        'export_file': path.name,
+                        'export_dir': str(path.parent),
+                        'file_size': path.stat().st_size,
+                        'file_size_mb': round(path.stat().st_size / 1024 / 1024, 2),
+                        'success': True
+                    })
+                else:
+                    # 导出失败，添加占位符
+                    export_files.append({
+                        'export_path': None,
+                        'export_file': None,
+                        'export_dir': str(export_dir),
+                        'file_size': 0,
+                        'file_size_mb': 0,
+                        'success': False,
+                        'error': '导出失败' if path is None else '文件不存在'
+                    })
+        elif export_path:
+            # 兼容旧格式（单个路径）
+            if export_path.exists():
+                export_files.append({
+                    'export_path': str(export_path),
+                    'export_file': export_path.name,
+                    'export_dir': str(export_path.parent),
+                    'file_size': export_path.stat().st_size,
+                    'file_size_mb': round(export_path.stat().st_size / 1024 / 1024, 2),
+                    'success': True
+                })
+            else:
+                export_files.append({
+                    'export_path': None,
+                    'export_file': None,
+                    'export_dir': str(export_dir),
+                    'file_size': 0,
+                    'file_size_mb': 0,
+                    'success': False,
+                    'error': '文件不存在'
+                })
+        
+        # 强制确保返回数量等于画板数量
+        while len(export_files) < expected_count:
+            export_files.append({
+                'export_path': None,
+                'export_file': None,
+                'export_dir': str(export_dir),
+                'file_size': 0,
+                'file_size_mb': 0,
+                'success': False,
+                'error': '未导出'
+            })
+            print(f"📋 API层: 补充占位符，当前数量: {len(export_files)}/{expected_count}")
+        
+        # 如果多了，截断（理论上不应该发生）
+        if len(export_files) > expected_count:
+            export_files = export_files[:expected_count]
+            print(f"📋 API层: 截断到 {expected_count} 个文件")
+        
+        print(f"📊 API层: 最终返回 {len(export_files)} 个文件（预期: {expected_count}）")
+        
+        # 简化返回格式：只返回数组
         response_data = {
-            'export_path': str(export_path),
-            'export_file': export_path.name,
-            'export_dir': str(export_path.parent),
-            'file_size': export_path.stat().st_size if export_path.exists() else 0,
-            'file_size_mb': round(export_path.stat().st_size / 1024 / 1024, 2) if export_path.exists() else 0
+            'export_files': export_files
         }
         
         # 设置缓存控制头，避免 Swagger UI 显示旧结果

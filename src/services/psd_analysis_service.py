@@ -74,14 +74,15 @@ def analyze_psd(psd_path: str | Path) -> Dict[str, Any]:
     # 提取所有智能对象
     smart_objects = _extract_smart_objects(psd, parent_path="")
 
-    # 图层结构（含层级）
+    # 图层结构（含层级，包含画板标记）
     layer_structure = _extract_layer_structure(psd, parent_path="")
     
-    # 统计信息
+    # 统计信息（增加画板数量统计）
     statistics = {
         "total_smart_objects": len(smart_objects),
         "total_layers": _count_all_layers(psd),
-        "has_smart_objects": len(smart_objects) > 0
+        "has_smart_objects": len(smart_objects) > 0,
+        "artboard_count": _count_artboards(psd),
     }
     
     # 文件信息
@@ -290,7 +291,19 @@ def _extract_layer_structure(psd: PSDImage, parent_path: str = "", depth: int = 
 
     def map_layer(layer, current_path: str, current_depth: int) -> Dict[str, Any]:
         name = layer.name if hasattr(layer, "name") else "未知图层"
-        layer_type = "smart_object" if isinstance(layer, SmartObjectLayer) else "group" if isinstance(layer, Group) or (hasattr(layer, "is_group") and layer.is_group()) else "layer"
+        # 基础类型：普通图层 / 组 / 智能对象
+        is_group = isinstance(layer, Group) or (hasattr(layer, "is_group") and layer.is_group())
+        layer_type = (
+            "smart_object"
+            if isinstance(layer, SmartObjectLayer)
+            else "group"
+            if is_group
+            else "layer"
+        )
+
+        # 仅根据 psd-tools 的真实画板标记判断（不再把顶层 group 视为画板）
+        is_artboard = _is_artboard_layer(layer)
+
         info: Dict[str, Any] = {
             "name": name,
             "path": current_path,
@@ -299,7 +312,8 @@ def _extract_layer_structure(psd: PSDImage, parent_path: str = "", depth: int = 
             "opacity": float(layer.opacity) / 255.0 if hasattr(layer, "opacity") and layer.opacity is not None else 1.0,
             "blend_mode": str(layer.blend_mode) if hasattr(layer, "blend_mode") and layer.blend_mode else "normal",
             "depth": current_depth,
-            "children": []
+            "children": [],
+            "is_artboard": is_artboard,
         }
 
         is_group = isinstance(layer, Group) or (hasattr(layer, "is_group") and layer.is_group())
@@ -354,4 +368,49 @@ def _count_all_layers(psd: PSDImage) -> int:
         pass
     
     return count
+
+
+def _count_artboards(psd: PSDImage) -> int:
+    """
+    统计画板数量。
+    
+    规则：
+    1. 如果是带有 artboard / is_artboard 标记的 Group，则视为真实的 Photoshop 画板；
+    2. 此外，顶层的 Group（depth == 0）也视为一个“逻辑画板”，方便业务把每个大组当作一个版位。
+    """
+    artboard_count = 0
+
+    def traverse(layers, depth: int):
+        nonlocal artboard_count
+        for layer in layers:
+            try:
+                is_group = isinstance(layer, Group) or (hasattr(layer, "is_group") and layer.is_group())
+
+                is_real_artboard = False
+                try:
+                    if hasattr(layer, "artboard") and layer.artboard:
+                        is_real_artboard = True
+                    elif hasattr(layer, "is_artboard") and getattr(layer, "is_artboard"):
+                        is_real_artboard = True
+                except Exception:
+                    is_real_artboard = False
+
+                # 真·画板 或 顶层组 -> 计为一个画板
+                if is_real_artboard or (is_group and depth == 0):
+                    artboard_count += 1
+
+                if is_group and hasattr(layer, "__iter__"):
+                    traverse(layer, depth + 1)
+            except Exception:
+                continue
+
+    try:
+        if hasattr(psd, "__iter__"):
+            traverse(psd, 0)
+        elif hasattr(psd, "layers"):
+            traverse(psd.layers, 0)
+    except Exception:
+        pass
+
+    return artboard_count
 

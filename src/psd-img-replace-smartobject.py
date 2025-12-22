@@ -221,6 +221,251 @@ def debug_print_all_layers(doc, max_depth=10, current_depth=0, parent_path=""):
         traceback.print_exc()
 
 
+def find_artboard_layers(doc, psd_path: Optional[Path] = None, debug: bool = False) -> List:
+    """
+    查找 PSD 中的所有画板图层
+    
+    Args:
+        doc: Photoshop 文档对象
+        psd_path: PSD 文件路径（可选，如果提供则使用分析服务获取画板信息）
+        debug: 是否打印调试信息
+    
+    Returns:
+        画板图层列表，每个元素包含：
+        - layer: 图层对象
+        - name: 图层名称
+        - path: 图层路径
+    """
+    artboards = []
+    
+    # 方法1: 如果提供了 psd_path，使用分析服务获取画板信息，然后在 PS 中查找对应图层
+    if psd_path:
+        try:
+            if debug:
+                print(f"  📋 方法1: 使用分析服务查找画板")
+                print(f"    分析 PSD 文件: {psd_path}")
+            
+            from src.services.psd_analysis_service import analyze_psd
+            analysis_result = analyze_psd(psd_path)
+            layer_structure = analysis_result.get('layer_structure', [])
+            statistics = analysis_result.get('statistics', {})
+            artboard_count = statistics.get('artboard_count', 0)
+            
+            if debug:
+                print(f"    分析结果: 统计显示有 {artboard_count} 个画板")
+                print(f"    图层结构数量: {len(layer_structure)}")
+            
+            # 从分析结果中提取画板名称
+            artboard_names = []
+            def extract_artboards(layers, parent_path=""):
+                for layer_info in layers:
+                    if layer_info.get('is_artboard', False):
+                        artboard_names.append({
+                            'name': layer_info.get('name', ''),
+                            'path': layer_info.get('path', '')
+                        })
+                        if debug:
+                            print(f"      找到画板: {layer_info.get('name', '')} (路径: {layer_info.get('path', '')})")
+                    if layer_info.get('children'):
+                        extract_artboards(layer_info['children'], layer_info.get('path', ''))
+            
+            extract_artboards(layer_structure)
+            
+            if artboard_names:
+                if debug:
+                    print(f"    ✅ 从分析服务找到 {len(artboard_names)} 个画板")
+                    print(f"    画板列表:")
+                    for i, ab_info in enumerate(artboard_names, 1):
+                        print(f"      [{i}] {ab_info['name']} (路径: {ab_info['path']})")
+                
+                # 在 Photoshop 文档中按名称查找对应的图层
+                def find_layer_by_name(layers, target_name):
+                    """递归查找指定名称的图层"""
+                    for layer in layers:
+                        try:
+                            layer_name = layer.name if hasattr(layer, 'name') else ""
+                            if layer_name == target_name:
+                                return layer
+                            # 如果是图层组，递归搜索
+                            if hasattr(layer, 'layers') and layer.layers:
+                                found = find_layer_by_name(layer.layers, target_name)
+                                if found:
+                                    return found
+                        except Exception as e:
+                            if debug:
+                                print(f"查找图层时出错: {e}")
+                            continue
+                    return None
+                
+                # 获取所有顶层图层
+                top_layers = []
+                try:
+                    if hasattr(doc, 'layers'):
+                        top_layers = list(doc.layers) if hasattr(doc.layers, '__iter__') else [doc.layers]
+                    elif hasattr(doc, '__iter__'):
+                        top_layers = list(doc)
+                except Exception as e:
+                    if debug:
+                        print(f"获取顶层图层时出错: {e}")
+                
+                # 查找每个画板对应的图层
+                if debug:
+                    print(f"    🔍 开始在 Photoshop 文档中查找对应的图层...")
+                    print(f"    顶层图层数量: {len(top_layers)}")
+                
+                for artboard_info in artboard_names:
+                    artboard_name = artboard_info['name']
+                    artboard_path = artboard_info['path']
+                    
+                    if debug:
+                        print(f"    🔎 查找画板图层: '{artboard_name}'")
+                    
+                    # 尝试在顶层图层中查找（画板通常是顶层图层组）
+                    found_layer = None
+                    try:
+                        # 先检查顶层图层
+                        if debug:
+                            print(f"      检查 {len(top_layers)} 个顶层图层...")
+                        for idx, layer in enumerate(top_layers):
+                            try:
+                                layer_name = layer.name if hasattr(layer, 'name') else ""
+                                if debug and idx < 5:  # 只打印前5个，避免日志过多
+                                    print(f"        图层[{idx}]: '{layer_name}'")
+                                if layer_name == artboard_name:
+                                    found_layer = layer
+                                    if debug:
+                                        print(f"      ✅ 在顶层图层中找到匹配: '{layer_name}'")
+                                    break
+                            except Exception as e:
+                                if debug:
+                                    print(f"        检查图层[{idx}]时出错: {e}")
+                                continue
+                        
+                        # 如果顶层没找到，递归搜索
+                        if not found_layer:
+                            if debug:
+                                print(f"      顶层未找到，开始递归搜索...")
+                            found_layer = find_layer_by_name(top_layers, artboard_name)
+                            if found_layer:
+                                if debug:
+                                    print(f"      ✅ 递归搜索找到图层")
+                    except Exception as e:
+                        if debug:
+                            print(f"      ❌ 查找画板图层 '{artboard_name}' 时出错: {e}")
+                            import traceback
+                            traceback.print_exc()
+                    
+                    if found_layer:
+                        artboards.append({
+                            'layer': found_layer,
+                            'name': artboard_name,
+                            'path': artboard_path
+                        })
+                        if debug:
+                            print(f"      ✅ 成功找到画板图层: {artboard_name} (路径: {artboard_path})")
+                    else:
+                        if debug:
+                            print(f"      ⚠️ 警告: 未在 Photoshop 文档中找到画板图层 '{artboard_name}'")
+                            print(f"        画板路径: {artboard_path}")
+                            print(f"        可能原因:")
+                            print(f"          1. 图层名称不匹配")
+                            print(f"          2. 画板不在顶层图层中")
+                            print(f"          3. Photoshop 文档结构与分析结果不一致")
+                
+                if artboards:
+                    if debug:
+                        print(f"    ✅ 方法1成功: 找到 {len(artboards)} 个画板图层")
+                    return artboards
+                else:
+                    if debug:
+                        print(f"    ⚠️ 方法1: 分析服务找到画板，但未在 Photoshop 中找到对应图层")
+            else:
+                if debug:
+                    print(f"    ⚠️ 方法1: 分析服务未找到画板")
+        except Exception as e:
+            if debug:
+                print(f"    ❌ 方法1失败: 使用分析服务查找画板时出错: {e}")
+                import traceback
+                traceback.print_exc()
+                print(f"    将尝试方法2: 直接在 Photoshop 文档中搜索")
+    
+    # 方法2: 直接在 Photoshop 文档中搜索画板（备用方法）
+    if debug:
+        print(f"  📋 方法2: 直接在 Photoshop 文档中搜索画板属性")
+    
+    def search_artboards(layers, parent_path="", depth=0):
+        """递归搜索画板"""
+        for layer in layers:
+            try:
+                layer_name = layer.name if hasattr(layer, 'name') else "未知图层"
+                current_path = f"{parent_path}/{layer_name}" if parent_path else layer_name
+                
+                # 检查是否是画板
+                is_artboard = False
+                detection_method = None
+                try:
+                    # 方法1: 检查是否有 artboard 属性
+                    if hasattr(layer, 'artboard') and layer.artboard:
+                        is_artboard = True
+                        detection_method = "artboard 属性"
+                    # 方法2: 检查是否有 is_artboard 属性
+                    elif hasattr(layer, 'is_artboard') and getattr(layer, 'is_artboard'):
+                        is_artboard = True
+                        detection_method = "is_artboard 属性"
+                    # 方法3: 检查图层类型
+                    elif hasattr(layer, 'kind'):
+                        kind_str = str(layer.kind).lower()
+                        if 'artboard' in kind_str:
+                            is_artboard = True
+                            detection_method = f"kind 属性 ({layer.kind})"
+                except Exception as e:
+                    if debug and depth == 0:  # 只打印顶层图层的错误，避免日志过多
+                        print(f"      检查图层 '{layer_name}' 时出错: {e}")
+                
+                if is_artboard:
+                    artboards.append({
+                        'layer': layer,
+                        'name': layer_name,
+                        'path': current_path
+                    })
+                    if debug:
+                        print(f"      ✅ 找到画板: {layer_name} (路径: {current_path}, 方法: {detection_method})")
+                
+                # 如果是图层组，递归搜索
+                if hasattr(layer, 'layers') and layer.layers:
+                    search_artboards(layer.layers, current_path, depth + 1)
+            except Exception as e:
+                if debug and depth == 0:
+                    print(f"      处理图层时出错: {e}")
+                continue
+    
+    try:
+        if hasattr(doc, 'layers'):
+            if debug:
+                print(f"    从 doc.layers 开始搜索...")
+            search_artboards(doc.layers, "", 0)
+        elif hasattr(doc, '__iter__'):
+            if debug:
+                print(f"    从 doc 迭代器开始搜索...")
+            search_artboards(list(doc), "", 0)
+        else:
+            if debug:
+                print(f"    ⚠️ 文档没有 layers 属性或迭代器")
+    except Exception as e:
+        if debug:
+            print(f"    ❌ 搜索画板时出错: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    if debug:
+        if artboards:
+            print(f"  ✅ 方法2成功: 找到 {len(artboards)} 个画板")
+        else:
+            print(f"  ⚠️ 方法2: 未找到画板")
+    
+    return artboards
+
+
 def find_smart_object_layers(doc, layer_name: Optional[str] = None, debug: bool = False) -> List:
     """
     递归查找 PSD 中的所有智能对象图层
@@ -1727,7 +1972,365 @@ def replace_and_export_psd_multi(
         except Exception as e:
             print(f"    ⚠️ 警告: 检查活动文档时出错: {e}")
         
-        # 导出图片
+        # ========== 查找画板并导出 ==========
+        # 参考 erpfile.py 的原理：直接使用 doc.layerSets 获取所有图层组（画板）
+        print(f"\n" + "=" * 70)
+        print("🎨 检查画板（使用 doc.layerSets 方法）")
+        print("=" * 70)
+        print(f"PSD 文件路径: {psd_path}")
+        print(f"文档名称: {doc.name if hasattr(doc, 'name') else '未知'}")
+        
+        export_paths = []  # 存储所有导出路径
+        
+        # 方法1: 直接使用 doc.layerSets（参考 erpfile.py）
+        layer_sets = []
+        try:
+            if hasattr(doc, 'layerSets'):
+                layer_sets = list(doc.layerSets) if hasattr(doc.layerSets, '__iter__') else [doc.layerSets]
+                print(f"✅ 使用 doc.layerSets 找到 {len(layer_sets)} 个图层组（画板）")
+                for i, ls in enumerate(layer_sets, 1):
+                    ls_name = ls.name if hasattr(ls, 'name') else "未知"
+                    print(f"   图层组[{i}]: {ls_name}")
+        except Exception as e:
+            print(f"⚠️ 使用 doc.layerSets 失败: {e}")
+            layer_sets = []
+        
+        # 方法2: 如果 layerSets 为空，尝试使用分析服务查找
+        if not layer_sets:
+            print(f"\n尝试使用分析服务查找画板...")
+            artboards = find_artboard_layers(doc, psd_path=psd_path, debug=True)
+            if artboards:
+                # 将分析服务找到的画板转换为图层组列表
+                layer_sets = [ab['layer'] for ab in artboards]
+                print(f"✅ 通过分析服务找到 {len(layer_sets)} 个画板")
+        
+        # 如果有图层组（画板），逐个导出
+        if layer_sets:
+            print(f"\n🔒 强制验证: 找到 {len(layer_sets)} 个图层组（画板），必须导出 {len(layer_sets)} 个文件")
+            print(f"   如果最终导出数量不匹配，将显示错误信息")
+            print("=" * 70)
+            
+            # 保存所有图层组的可见性状态（用于后续恢复）
+            original_visibility = {}
+            try:
+                for ls in layer_sets:
+                    try:
+                        ls_name = ls.name if hasattr(ls, 'name') else "未知"
+                        original_visibility[ls_name] = ls.visible if hasattr(ls, 'visible') else True
+                    except Exception:
+                        continue
+                print(f"    ✅ 已保存 {len(original_visibility)} 个图层组的可见性状态")
+            except Exception as e:
+                print(f"    ⚠️ 警告: 保存图层可见性时出错: {e}")
+            
+            # 强制循环：确保每个图层组都被处理（参考 erpfile.py，但去掉 break）
+            print(f"\n🔄 开始循环处理 {len(layer_sets)} 个图层组（画板）...")
+            print(f"   图层组列表:")
+            for idx, ls in enumerate(layer_sets, 1):
+                ls_name = ls.name if hasattr(ls, 'name') else "未知"
+                print(f"     [{idx}] {ls_name}")
+            print(f"   将逐个处理以上 {len(layer_sets)} 个图层组\n")
+            
+            for i, artboard_layer in enumerate(layer_sets, 1):
+                # 获取图层组名称
+                try:
+                    artboard_name = artboard_layer.name if hasattr(artboard_layer, 'name') else f"图层组{i}"
+                except Exception:
+                    artboard_name = f"图层组{i}"
+                
+                print(f"\n" + "=" * 70)
+                print(f"⏳ [{i}/{len(layer_sets)}] 正在导出图层组（画板）: {artboard_name}")
+                print("=" * 70)
+                print(f"🔍 循环验证: 这是第 {i} 个图层组，共 {len(layer_sets)} 个")
+                print(f"   图层组名称: '{artboard_name}'")
+                print(f"   图层对象: {type(artboard_layer).__name__}")
+                
+                # 强制确保每个图层组都有唯一的文件名（使用索引）
+                try:
+                    # 生成导出文件名（确保唯一性）
+                    if output_filename is None:
+                        base_name = psd_path.stem
+                        # 清理图层组名称，移除特殊字符，避免文件名问题
+                        safe_artboard_name = "".join(c for c in artboard_name if c.isalnum() or c in (' ', '-', '_')).strip()
+                        safe_artboard_name = safe_artboard_name.replace(' ', '_')
+                        # 使用索引确保文件名唯一，即使图层组名称相同
+                        artboard_export_filename = f"{base_name}_artboard{i}_{safe_artboard_name}_export.png"
+                    else:
+                        # 如果指定了文件名，在文件名和扩展名之间插入图层组索引和名称
+                        output_path = Path(output_filename)
+                        safe_artboard_name = "".join(c for c in artboard_name if c.isalnum() or c in (' ', '-', '_')).strip()
+                        safe_artboard_name = safe_artboard_name.replace(' ', '_')
+                        # 使用索引确保唯一性
+                        artboard_export_filename = f"{output_path.stem}_artboard{i}_{safe_artboard_name}{output_path.suffix}"
+                    
+                    artboard_export_path = export_dir / artboard_export_filename
+                    print(f"    📝 导出文件名: {artboard_export_filename}")
+                    print(f"    📁 完整路径: {artboard_export_path}")
+                    print(f"    🔢 画板索引: {i}/{len(layer_sets)}")
+                    
+                    # 检查权限
+                    has_permission, perm_error = check_write_permission(artboard_export_path)
+                    if not has_permission:
+                        print(f"    ❌ 权限检查失败: {perm_error}")
+                        print(f"    ⚠️ 跳过图层组 [{i}/{len(layer_sets)}]: {artboard_name}")
+                        export_paths.append(None)  # 占位，表示这个图层组导出失败
+                        continue
+                    print(f"    ✅ 权限检查通过")
+                    
+                    # 确保导出目录存在
+                    artboard_export_path.parent.mkdir(parents=True, exist_ok=True)
+                    print(f"    ✅ 导出目录已准备")
+                    
+                    # 参考 erpfile.py 的原理：先隐藏所有图层组，然后只显示当前图层组
+                    try:
+                        print(f"    🔄 正在设置图层可见性（参考 erpfile.py 原理）...")
+                        print(f"       目标图层组名称: '{artboard_name}'")
+                        
+                        # 先隐藏所有图层组
+                        print(f"       步骤1: 隐藏所有图层组...")
+                        for ls in layer_sets:
+                            try:
+                                ls_name = ls.name if hasattr(ls, 'name') else "未知"
+                                if hasattr(ls, 'visible'):
+                                    ls.visible = False
+                                    print(f"           🔒 隐藏: '{ls_name}'")
+                            except Exception as e:
+                                print(f"           ⚠️ 隐藏图层组时出错: {e}")
+                        
+                        # 只显示当前图层组
+                        print(f"       步骤2: 只显示当前图层组 '{artboard_name}'...")
+                        artboard_layer.visible = True
+                        print(f"           ✅ 显示: '{artboard_name}'")
+                        
+                        # 验证可见性
+                        print(f"       步骤3: 验证可见性...")
+                        visible_count = 0
+                        visible_names = []
+                        for ls in layer_sets:
+                            try:
+                                if hasattr(ls, 'visible') and ls.visible:
+                                    visible_count += 1
+                                    ls_name = ls.name if hasattr(ls, 'name') else "未知"
+                                    visible_names.append(ls_name)
+                            except Exception:
+                                pass
+                        
+                        print(f"           可见图层组数量: {visible_count}")
+                        print(f"           可见图层组: {visible_names}")
+                        
+                        if visible_count == 1 and visible_names[0] == artboard_name:
+                            print(f"           ✅ 验证通过: 只有目标图层组 '{artboard_name}' 可见")
+                        else:
+                            print(f"           ⚠️ 警告: 可见性设置可能不正确")
+                            print(f"              预期: 只有 '{artboard_name}' 可见")
+                            print(f"              实际: {visible_names}")
+                        
+                        # 选中当前图层组
+                        doc.activeLayer = artboard_layer
+                        print(f"    ✅ 已选中图层组: {artboard_name}")
+                        
+                        # 等待一下，让 PS 完成可见性设置
+                        import time
+                        time.sleep(1.5)  # 增加等待时间，确保可见性设置生效
+                        
+                    except Exception as e:
+                        print(f"    ⚠️ 警告: 设置图层可见性时出错: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        # 继续尝试导出
+                    
+                    # 导出画板
+                    print(f"    📤 正在导出到: {artboard_export_path}")
+                    try:
+                        options = session.ExportOptionsSaveForWeb()
+                        
+                        # 记录导出前的状态
+                        print(f"       当前活动图层: {doc.activeLayer.name if hasattr(doc.activeLayer, 'name') else '未知'}")
+                        print(f"       导出区域: 整个文档（已隐藏其他图层组，只显示当前图层组）")
+                        print(f"       导出文件: {artboard_export_filename}")
+                        print(f"       导出目录: {export_dir}")
+                        
+                        # 重要：exportDocument 使用 SaveForWeb 时，需要传递目录路径，而不是完整文件路径
+                        # 但我们需要指定文件名，所以先导出到临时文件，然后重命名
+                        # 或者直接使用完整路径（某些版本可能支持）
+                        # 参考 erpfile.py：传递目录路径，但文件名可能由 PS 自动生成
+                        # 为了确保文件名正确，我们使用完整路径
+                        export_file_path_str = str(artboard_export_path)
+                        print(f"       导出路径（字符串）: {export_file_path_str}")
+                        
+                        # 导出文档（只包含当前可见的图层组）
+                        # 注意：SaveForWeb 可能会自动添加扩展名，所以我们需要确保路径正确
+                        doc.exportDocument(
+                            export_file_path_str,
+                            exportAs=session.ExportType.SaveForWeb,
+                            options=options
+                        )
+                        print(f"    ✅ exportDocument 调用成功")
+                        
+                        # 注意：不需要清除选择区域，因为我们没有设置选择区域
+                        
+                        # 等待文件写入完成
+                        import time
+                        time.sleep(2.0)  # 增加等待时间，确保文件写入完成
+                        
+                        # 检查文件是否存在
+                        # 注意：SaveForWeb 可能会修改文件名（添加扩展名或修改名称）
+                        # 所以我们需要检查多种可能的文件名
+                        max_retries = 10
+                        retry_count = 0
+                        actual_export_path = None
+                        
+                        # 可能的文件名变体
+                        possible_paths = [
+                            artboard_export_path,  # 原始路径
+                            export_dir / f"{artboard_export_path.stem}.png",  # 可能去掉后缀
+                            export_dir / artboard_export_filename,  # 原始文件名
+                        ]
+                        
+                        # 如果原始路径没有 .png 扩展名，添加它
+                        if not artboard_export_path.suffix.lower() == '.png':
+                            possible_paths.append(export_dir / f"{artboard_export_path.stem}.png")
+                        
+                        print(f"       检查可能的文件路径:")
+                        for pp in possible_paths:
+                            print(f"          - {pp}")
+                        
+                        while retry_count < max_retries and actual_export_path is None:
+                            for pp in possible_paths:
+                                if pp.exists():
+                                    actual_export_path = pp
+                                    print(f"       找到文件: {actual_export_path}")
+                                    break
+                            
+                            if actual_export_path is None:
+                                retry_count += 1
+                                time.sleep(0.5)
+                                if retry_count < max_retries:
+                                    print(f"       等待文件生成... ({retry_count}/{max_retries})")
+                        
+                        # 如果还是找不到，列出导出目录中的所有文件，帮助调试
+                        if actual_export_path is None:
+                            print(f"       ⚠️ 未找到预期文件，列出导出目录中的所有文件:")
+                            try:
+                                dir_files = list(export_dir.glob("*"))
+                                if dir_files:
+                                    for df in sorted(dir_files):
+                                        print(f"          - {df.name} ({df.stat().st_size} 字节)")
+                                else:
+                                    print(f"          (目录为空)")
+                            except Exception as e:
+                                print(f"          (无法列出目录: {e})")
+                        
+                        if actual_export_path and actual_export_path.exists():
+                            # 如果实际文件路径与预期不同，更新它
+                            if actual_export_path != artboard_export_path:
+                                print(f"       ⚠️ 注意: 实际文件路径与预期不同")
+                                print(f"          预期: {artboard_export_path}")
+                                print(f"          实际: {actual_export_path}")
+                                artboard_export_path = actual_export_path
+                            file_size = artboard_export_path.stat().st_size
+                            file_size_mb = file_size / 1024 / 1024
+                            print(f"    ✅✅✅ 导出成功! ✅✅✅")
+                            print(f"       文件路径: {artboard_export_path}")
+                            print(f"       文件大小: {file_size} 字节 ({file_size_mb:.2f} MB)")
+                            print(f"       图层组 [{i}/{len(layer_sets)}]: {artboard_name}")
+                            export_paths.append(artboard_export_path)
+                            print(f"    ✅ 已添加到导出列表")
+                            print(f"    📊 当前成功导出: {len([p for p in export_paths if p is not None])}/{len(layer_sets)} 个文件")
+                        else:
+                            print(f"    ❌❌❌ 错误: 导出文件不存在! ❌❌❌")
+                            print(f"       预期路径: {artboard_export_path}")
+                            print(f"       已重试 {max_retries} 次，文件仍未生成")
+                            print(f"       图层组 [{i}/{len(layer_sets)}]: {artboard_name}")
+                            print(f"       可能原因:")
+                            print(f"         1. Photoshop 导出失败但未报错")
+                            print(f"         2. 文件路径权限问题")
+                            print(f"         3. 磁盘空间不足")
+                            export_paths.append(None)  # 占位，表示这个图层组导出失败
+                            
+                    except Exception as export_error:
+                        print(f"    ❌❌❌ exportDocument 调用失败: {export_error} ❌❌❌")
+                        print(f"       图层组 [{i}/{len(layer_sets)}]: {artboard_name}")
+                        import traceback
+                        traceback.print_exc()
+                        export_paths.append(None)  # 占位，表示这个图层组导出失败
+                        continue
+                        
+                except Exception as e:
+                    print(f"    ❌❌❌ 导出图层组 '{artboard_name}' 时发生异常: {e} ❌❌❌")
+                    print(f"       图层组 [{i}/{len(layer_sets)}]: {artboard_name}")
+                    import traceback
+                    traceback.print_exc()
+                    export_paths.append(None)  # 占位，表示这个图层组导出失败
+                    continue
+                
+                # 循环结束标记
+                print(f"\n    ✅ 图层组 [{i}/{len(layer_sets)}] 处理完成（无论成功或失败）")
+                print(f"    📊 当前进度: 已处理 {i}/{len(layer_sets)} 个图层组")
+                print(f"    📊 当前成功导出: {len([p for p in export_paths if p is not None])} 个文件")
+            
+            # 循环完成验证
+            print(f"\n" + "=" * 70)
+            print(f"🔄 循环处理完成验证")
+            print("=" * 70)
+            print(f"   预期处理图层组数: {len(layer_sets)}")
+            print(f"   实际循环次数: {i} (应该等于 {len(layer_sets)})")
+            print(f"   导出路径列表长度: {len(export_paths)} (应该等于 {len(layer_sets)})")
+            if len(export_paths) != len(layer_sets):
+                print(f"   ❌ 错误: 导出路径数量 ({len(export_paths)}) 不等于图层组数量 ({len(layer_sets)})")
+            else:
+                print(f"   ✅ 验证通过: 所有图层组都已处理")
+            print("=" * 70)
+            
+            # 导出完成后，统计结果
+            print(f"\n" + "=" * 70)
+            print(f"📊 图层组导出统计")
+            print("=" * 70)
+            successful_exports = [p for p in export_paths if p is not None]
+            failed_exports = len(export_paths) - len(successful_exports)
+            print(f"   总图层组数: {len(layer_sets)}")
+            print(f"   成功导出: {len(successful_exports)}")
+            print(f"   失败数量: {failed_exports}")
+            
+            # 强制确保返回数量等于图层组数量
+            if len(export_paths) != len(layer_sets):
+                print(f"   ⚠️ 警告: 导出路径数量 ({len(export_paths)}) 不等于图层组数量 ({len(layer_sets)})")
+                print(f"   正在修复: 补充占位符以确保数量一致...")
+                # 补充 None 占位符，确保数量一致
+                while len(export_paths) < len(layer_sets):
+                    export_paths.append(None)
+                    print(f"      补充了 1 个占位符，当前数量: {len(export_paths)}")
+                # 如果多了，截断（理论上不应该发生）
+                if len(export_paths) > len(layer_sets):
+                    export_paths = export_paths[:len(layer_sets)]
+                    print(f"      截断到 {len(layer_sets)} 个")
+                print(f"   ✅ 修复完成: 现在返回 {len(export_paths)} 个路径（等于图层组数量）")
+            
+            # 重要：固定返回和分析出的画板一样数量的文件（包括失败的占位符）
+            # 不筛选掉 None，保持所有路径（成功的是 Path 对象，失败的是 None）
+            print(f"   📋 最终返回: {len(export_paths)} 个路径（成功: {len(successful_exports)}, 失败: {failed_exports}）")
+            
+            # 恢复所有图层组的可见性
+            try:
+                print(f"\n    🔄 正在恢复图层组可见性...")
+                restored_count = 0
+                for ls in layer_sets:
+                    try:
+                        ls_name = ls.name if hasattr(ls, 'name') else "未知"
+                        if ls_name in original_visibility and hasattr(ls, 'visible'):
+                            ls.visible = original_visibility[ls_name]
+                            restored_count += 1
+                    except Exception as e:
+                        print(f"        ⚠️ 恢复图层组 '{ls_name}' 可见性时出错: {e}")
+                        continue
+                print(f"    ✅ 已恢复 {restored_count}/{len(layer_sets)} 个图层组的可见性")
+            except Exception as e:
+                print(f"    ⚠️ 警告: 恢复图层组可见性时出错: {e}")
+        else:
+            # 没有画板：按原来的逻辑导出一张图
+            print("未找到画板，将导出整张文档")
+            print("=" * 70)
+            
         if output_filename is None:
             output_filename = f"{psd_path.stem}_export.png"
         
@@ -1755,6 +2358,7 @@ def replace_and_export_psd_multi(
                 options=options
             )
             print(f"    ✅ 导出成功")
+                export_paths.append(export_path)
         except Exception as e:
             print(f"\n❌ 导出失败: {e}")
             import traceback
@@ -1763,12 +2367,36 @@ def replace_and_export_psd_multi(
             raise
         
         print(f"\n" + "=" * 70)
-        print("✅ 处理完成")
+        print("✅ 最终处理结果")
         print("=" * 70)
-        print(f"导出路径: {export_path}")
-        if export_path.exists():
-            print(f"文件大小: {export_path.stat().st_size / 1024 / 1024:.2f} MB")
+        print(f"共导出 {len(export_paths)} 个文件:")
+        if export_paths:
+            for i, path in enumerate(export_paths, 1):
+                if path and path.exists():
+                    file_size_mb = path.stat().st_size / 1024 / 1024
+                    print(f"  ✅ [{i}] {path.name} ({file_size_mb:.2f} MB)")
+                    print(f"     完整路径: {path}")
+                elif path:
+                    print(f"  ❌ [{i}] {path.name} (文件不存在)")
+                else:
+                    print(f"  ❌ [{i}] (导出失败)")
+        else:
+            print(f"  ⚠️ 没有成功导出的文件!")
         print("=" * 70)
+        
+        # 最终验证：确保如果有图层组，返回数量一致
+        if layer_sets:
+            successful_count = len([p for p in export_paths if p is not None])
+            if successful_count == 0:
+                print(f"\n❌❌❌ 严重错误: 找到 {len(layer_sets)} 个图层组（画板），但没有任何文件成功导出! ❌❌❌")
+                print(f"   请检查上方的错误日志，找出导出失败的原因")
+            elif len(export_paths) != len(layer_sets):
+                print(f"\n⚠️ 警告: 找到 {len(layer_sets)} 个图层组，但返回路径数量 ({len(export_paths)}) 不一致")
+                print(f"   成功导出: {successful_count} 个文件")
+                print(f"   请检查上方的错误日志")
+            else:
+                print(f"\n✅ 验证通过: 返回 {len(export_paths)} 个路径（等于图层组数量 {len(layer_sets)}）")
+                print(f"   成功导出: {successful_count} 个文件")
         
         # 关闭主文档
         try:
@@ -1778,7 +2406,8 @@ def replace_and_export_psd_multi(
             print(f"⚠️ 警告: 关闭主文档时出错: {e}")
     
     gc.collect()
-    return export_path
+    # 统一返回列表格式，方便处理
+    return export_paths if export_paths else []
 
 
 def main():
