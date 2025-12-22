@@ -909,6 +909,7 @@ class PSDAnalysisResponse(BaseModel):
     document_info: dict = Field(..., description="文档信息（尺寸、分辨率等）")
     smart_objects: list = Field(..., description="智能对象列表（详细信息）")
     statistics: dict = Field(..., description="统计信息")
+    layer_structure: list = Field(..., description="图层树结构（含层级、可见性、类型等）")
     timestamp: str = Field(..., description="分析时间戳")
     
     class Config:
@@ -971,6 +972,29 @@ class PSDAnalysisResponse(BaseModel):
                     "total_layers": 5,
                     "has_smart_objects": True
                 },
+                "layer_structure": [
+                    {
+                        "name": "组1",
+                        "path": "组1",
+                        "type": "group",
+                        "visible": True,
+                        "opacity": 1.0,
+                        "blend_mode": "normal",
+                        "depth": 0,
+                        "children": [
+                            {
+                                "name": "图片",
+                                "path": "组1/图片",
+                                "type": "smart_object",
+                                "visible": True,
+                                "opacity": 1.0,
+                                "blend_mode": "normal",
+                                "depth": 1,
+                                "children": []
+                            }
+                        ]
+                    }
+                ],
                 "timestamp": "2024-01-01T12:00:00"
             }
         }
@@ -1550,6 +1574,7 @@ async def analyze_psd_file(request: PSDAnalysisRequest):
             document_info=analysis_result["document_info"],
             smart_objects=analysis_result["smart_objects"],
             statistics=analysis_result["statistics"],
+            layer_structure=analysis_result.get("layer_structure", []),
             timestamp=analysis_result["timestamp"]
         )
         

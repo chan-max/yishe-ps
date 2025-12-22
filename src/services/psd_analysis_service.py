@@ -73,6 +73,9 @@ def analyze_psd(psd_path: str | Path) -> Dict[str, Any]:
     
     # 提取所有智能对象
     smart_objects = _extract_smart_objects(psd, parent_path="")
+
+    # 图层结构（含层级）
+    layer_structure = _extract_layer_structure(psd, parent_path="")
     
     # 统计信息
     statistics = {
@@ -94,6 +97,7 @@ def analyze_psd(psd_path: str | Path) -> Dict[str, Any]:
         "document_info": document_info,
         "smart_objects": smart_objects,
         "statistics": statistics,
+        "layer_structure": layer_structure,
         "timestamp": datetime.now().isoformat()
     }
 
@@ -278,6 +282,47 @@ def _extract_smart_object_details(layer: SmartObjectLayer, layer_path: str) -> D
         info["has_mask"] = False
     
     return info
+
+
+def _extract_layer_structure(psd: PSDImage, parent_path: str = "", depth: int = 0) -> List[Dict[str, Any]]:
+    """提取完整图层树结构。"""
+    layers_info: List[Dict[str, Any]] = []
+
+    def map_layer(layer, current_path: str, current_depth: int) -> Dict[str, Any]:
+        name = layer.name if hasattr(layer, "name") else "未知图层"
+        layer_type = "smart_object" if isinstance(layer, SmartObjectLayer) else "group" if isinstance(layer, Group) or (hasattr(layer, "is_group") and layer.is_group()) else "layer"
+        info: Dict[str, Any] = {
+            "name": name,
+            "path": current_path,
+            "type": layer_type,
+            "visible": layer.visible if hasattr(layer, "visible") else True,
+            "opacity": float(layer.opacity) / 255.0 if hasattr(layer, "opacity") and layer.opacity is not None else 1.0,
+            "blend_mode": str(layer.blend_mode) if hasattr(layer, "blend_mode") and layer.blend_mode else "normal",
+            "depth": current_depth,
+            "children": []
+        }
+
+        is_group = isinstance(layer, Group) or (hasattr(layer, "is_group") and layer.is_group())
+        if is_group and hasattr(layer, "__iter__"):
+            for child in layer:
+                child_path = f"{current_path}/{child.name}" if current_path else (child.name if hasattr(child, "name") else "未知图层")
+                info["children"].append(map_layer(child, child_path, current_depth + 1))
+
+        return info
+
+    try:
+        if hasattr(psd, "__iter__"):
+            for layer in psd:
+                layer_path = f"{parent_path}/{layer.name}" if parent_path else (layer.name if hasattr(layer, "name") else "未知图层")
+                layers_info.append(map_layer(layer, layer_path, depth))
+        elif hasattr(psd, "layers"):
+            for layer in psd.layers:
+                layer_path = f"{parent_path}/{layer.name}" if parent_path else (layer.name if hasattr(layer, "name") else "未知图层")
+                layers_info.append(map_layer(layer, layer_path, depth))
+    except Exception:
+        pass
+
+    return layers_info
 
 
 def _count_all_layers(psd: PSDImage) -> int:
