@@ -317,7 +317,13 @@
           </div>
 
           <div v-if="state.analyzeResult" class="ui segment" style="margin-top: 1.5rem;">
-            <h3 class="ui dividing header">分析结果</h3>
+            <div class="ui dividing header" style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+              <span>分析结果</span>
+              <div style="display: flex; gap: 6px;">
+                <button class="ui tiny button" @click="copyAnalyzeResultRaw">复制 JSON</button>
+                <button class="ui tiny button" @click="copyAnalyzeResultEval">复制 JS 表达式</button>
+              </div>
+            </div>
             <div class="code-output">{{ state.analyzeResult }}</div>
           </div>
         </div>
@@ -591,6 +597,49 @@
           }
         }
 
+        async function copyToClipboard(text) {
+          if (!text) {
+            throw new Error('没有可复制的内容');
+          }
+          if (navigator?.clipboard?.writeText) {
+            await navigator.clipboard.writeText(text);
+            return;
+          }
+          // 兼容旧浏览器
+          const textarea = document.createElement('textarea');
+          textarea.value = text;
+          textarea.style.position = 'fixed';
+          textarea.style.opacity = '0';
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand('copy');
+          document.body.removeChild(textarea);
+        }
+
+        async function copyAnalyzeResultRaw() {
+          try {
+            await copyToClipboard(state.analyzeResult);
+            state.lastLog = '分析结果已复制（JSON 原样）';
+          } catch (e) {
+            state.lastLog = `复制失败: ${e.message || e}`;
+          }
+        }
+
+        async function copyAnalyzeResultEval() {
+          try {
+            const raw = (state.analyzeResult || '').trim();
+            if (!raw) {
+              throw new Error('没有可复制的内容');
+            }
+            // 包裹括号，便于直接在控制台粘贴作为表达式
+            const wrapped = (raw.startsWith('{') || raw.startsWith('[')) ? `(${raw})` : raw;
+            await copyToClipboard(wrapped);
+            state.lastLog = '分析结果已复制（控制台可直接粘贴执行）';
+          } catch (e) {
+            state.lastLog = `复制失败: ${e.message || e}`;
+          }
+        }
+
         async function processPsd() {
           state.process.psd_path = normalizePath(state.process.psd_path || '');
           state.process.image_path = normalizePath(state.process.image_path || '');
@@ -636,7 +685,9 @@
           processPsd,
           startPhotoshop,
           stopPhotoshop,
-          restartPhotoshop
+          restartPhotoshop,
+          copyAnalyzeResultRaw,
+          copyAnalyzeResultEval
         };
       }
     }).mount('#app');
