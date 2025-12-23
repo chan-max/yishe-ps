@@ -2358,7 +2358,7 @@ def replace_and_export_psd_multi(
                 options=options
             )
             print(f"    ✅ 导出成功")
-                export_paths.append(export_path)
+            export_paths.append(export_path)
         except Exception as e:
             print(f"\n❌ 导出失败: {e}")
             import traceback
