@@ -910,6 +910,7 @@ class PSDAnalysisResponse(BaseModel):
     smart_objects: list = Field(..., description="智能对象列表（详细信息）")
     statistics: dict = Field(..., description="统计信息")
     layer_structure: list = Field(..., description="图层树结构（含层级、可见性、类型等）")
+    artboards: list = Field(..., description="画板列表（包含每个画板的尺寸、位置和智能对象）")
     timestamp: str = Field(..., description="分析时间戳")
     
     class Config:
@@ -1664,6 +1665,7 @@ async def analyze_psd_file(request: PSDAnalysisRequest):
             smart_objects=analysis_result["smart_objects"],
             statistics=analysis_result["statistics"],
             layer_structure=analysis_result.get("layer_structure", []),
+            artboards=analysis_result.get("artboards", []),
             timestamp=analysis_result["timestamp"]
         )
         

@@ -16,6 +16,207 @@ except ImportError:
     Group = None
 
 
+def _is_artboard_layer(layer: Layer) -> bool:
+    """
+    判断图层是否是画板
+    
+    Args:
+        layer: 图层对象
+    
+    Returns:
+        是否是画板
+    """
+    try:
+        # 检查是否有 artboard 属性
+        if hasattr(layer, "artboard") and layer.artboard:
+            return True
+        # 检查是否有 is_artboard 属性
+        if hasattr(layer, "is_artboard") and getattr(layer, "is_artboard"):
+            return True
+        # 检查是否是顶层组（作为逻辑画板）
+        if isinstance(layer, Group) or (hasattr(layer, "is_group") and layer.is_group()):
+            # 这里不直接返回 True，因为需要结合 depth 判断
+            # 在调用处会结合 depth 来判断
+            pass
+    except Exception:
+        pass
+    return False
+
+
+def _extract_artboard_info(layer: Layer, layer_path: str) -> Dict[str, Any]:
+    """
+    提取画板的详细信息
+    
+    Args:
+        layer: 画板图层对象
+        layer_path: 图层路径
+    
+    Returns:
+        画板信息字典
+    """
+    info: Dict[str, Any] = {
+        "name": layer.name if hasattr(layer, "name") else "未知画板",
+        "path": layer_path,
+        "visible": layer.visible if hasattr(layer, "visible") else True,
+    }
+    
+    # 位置信息
+    if hasattr(layer, 'left') and layer.left is not None:
+        info["position"] = {
+            "x": int(layer.left),
+            "y": int(layer.top) if hasattr(layer, 'top') and layer.top is not None else 0,
+            "left": int(layer.left),
+            "top": int(layer.top) if hasattr(layer, 'top') and layer.top is not None else 0,
+            "right": int(layer.right) if hasattr(layer, 'right') and layer.right is not None else 0,
+            "bottom": int(layer.bottom) if hasattr(layer, 'bottom') and layer.bottom is not None else 0,
+        }
+    else:
+        info["position"] = {
+            "x": 0,
+            "y": 0,
+            "left": 0,
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+        }
+    
+    # 尺寸信息
+    width = 0
+    height = 0
+    
+    if hasattr(layer, 'width') and layer.width is not None:
+        width = int(layer.width)
+    elif hasattr(layer, 'right') and hasattr(layer, 'left') and layer.right is not None and layer.left is not None:
+        width = int(layer.right - layer.left)
+    
+    if hasattr(layer, 'height') and layer.height is not None:
+        height = int(layer.height)
+    elif hasattr(layer, 'bottom') and hasattr(layer, 'top') and layer.bottom is not None and layer.top is not None:
+        height = int(layer.bottom - layer.top)
+    
+    info["size"] = {
+        "width": width,
+        "height": height,
+        "aspect_ratio": round(width / height, 4) if height > 0 else 0
+    }
+    
+    return info
+
+
+def _extract_artboards_with_smart_objects(psd: PSDImage) -> List[Dict[str, Any]]:
+    """
+    提取所有画板及其包含的智能对象
+    
+    规则：最外层的图层组就是画板，有几个最外层图层组就显示为几个画板
+    
+    Args:
+        psd: PSD 图像对象
+    
+    Returns:
+        画板列表，每个画板包含其智能对象信息
+    """
+    artboards = []
+    
+    def extract_artboard_from_group(layer: Group, layer_path: str) -> Dict[str, Any]:
+        """
+        从图层组提取画板信息
+        
+        Args:
+            layer: 图层组对象
+            layer_path: 图层路径
+        
+        Returns:
+            画板信息字典
+        """
+        # 提取画板基本信息
+        artboard_info = _extract_artboard_info(layer, layer_path)
+        
+        # 获取画板的绝对位置（用于计算智能对象的相对位置）
+        # 优先使用 left/top，如果没有则使用 x/y
+        artboard_pos = artboard_info.get("position", {})
+        artboard_left = artboard_pos.get("left", artboard_pos.get("x", 0))
+        artboard_top = artboard_pos.get("top", artboard_pos.get("y", 0))
+        
+        # 提取画板内的智能对象
+        smart_objects_in_artboard = []
+        
+        def find_smart_objects_in_layer(l, parent_path: str = ""):
+            """在图层中递归查找智能对象"""
+            if isinstance(l, SmartObjectLayer):
+                so_info = _extract_smart_object_details(l, parent_path)
+                
+                # 计算智能对象相对于画板的坐标
+                # 优先使用 left/top，如果没有则使用 x/y
+                so_pos = so_info.get("position", {})
+                so_absolute_x = so_pos.get("left", so_pos.get("x", 0))
+                so_absolute_y = so_pos.get("top", so_pos.get("y", 0))
+                
+                # 转换为相对于画板的坐标
+                so_relative_x = so_absolute_x - artboard_left
+                so_relative_y = so_absolute_y - artboard_top
+                
+                # 更新位置信息，添加相对坐标（使用 x/y 作为相对坐标）
+                so_info["position"]["relative_x"] = so_relative_x
+                so_info["position"]["relative_y"] = so_relative_y
+                # 同时保留绝对坐标用于兼容
+                so_info["position"]["absolute_x"] = so_absolute_x
+                so_info["position"]["absolute_y"] = so_absolute_y
+                # 为了前端方便，也添加 relative_left 和 relative_top
+                so_info["position"]["relative_left"] = so_relative_x
+                so_info["position"]["relative_top"] = so_relative_y
+                
+                smart_objects_in_artboard.append(so_info)
+            elif isinstance(l, Group) or (hasattr(l, "is_group") and l.is_group()):
+                # 如果是图层组，递归查找子图层中的智能对象
+                if hasattr(l, "__iter__"):
+                    for child in l:
+                        child_name = child.name if hasattr(child, "name") else "未知图层"
+                        child_path = f"{parent_path}/{child_name}" if parent_path else child_name
+                        find_smart_objects_in_layer(child, child_path)
+        
+        # 在画板（图层组）内查找所有智能对象
+        if hasattr(layer, "__iter__"):
+            for child in layer:
+                child_name = child.name if hasattr(child, "name") else "未知图层"
+                child_path = f"{layer_path}/{child_name}" if layer_path else child_name
+                find_smart_objects_in_layer(child, child_path)
+        
+        artboard_info["smart_objects"] = smart_objects_in_artboard
+        artboard_info["smart_object_count"] = len(smart_objects_in_artboard)
+        
+        return artboard_info
+    
+    # 只提取最外层（depth=0）的图层组作为画板
+    try:
+        top_level_layers = []
+        if hasattr(psd, "__iter__"):
+            top_level_layers = list(psd)
+        elif hasattr(psd, "layers"):
+            top_level_layers = list(psd.layers)
+        
+        for layer in top_level_layers:
+            try:
+                # 只处理最外层的图层组
+                is_group = isinstance(layer, Group) or (hasattr(layer, "is_group") and layer.is_group())
+                
+                if is_group:
+                    layer_name = layer.name if hasattr(layer, "name") else "未知画板"
+                    layer_path = layer_name
+                    
+                    # 提取画板信息
+                    artboard_info = extract_artboard_from_group(layer, layer_path)
+                    artboards.append(artboard_info)
+                    
+            except Exception as e:
+                # 跳过无法处理的图层
+                continue
+                
+    except Exception as e:
+        pass
+    
+    return artboards
+
+
 def _print_layer_structure(layer_structure: List[Dict[str, Any]], indent: str = "", is_last: bool = True):
     """
     递归打印图层结构树
@@ -118,12 +319,15 @@ def analyze_psd(psd_path: str | Path) -> Dict[str, Any]:
     # 图层结构（含层级，包含画板标记）
     layer_structure = _extract_layer_structure(psd, parent_path="")
     
+    # 提取画板信息（包含每个画板的智能对象）
+    artboards = _extract_artboards_with_smart_objects(psd)
+    
     # 统计信息（增加画板数量统计）
     statistics = {
         "total_smart_objects": len(smart_objects),
         "total_layers": _count_all_layers(psd),
         "has_smart_objects": len(smart_objects) > 0,
-        "artboard_count": _count_artboards(psd),
+        "artboard_count": len(artboards),
     }
     
     # 文件信息
@@ -141,6 +345,7 @@ def analyze_psd(psd_path: str | Path) -> Dict[str, Any]:
         "smart_objects": smart_objects,
         "statistics": statistics,
         "layer_structure": layer_structure,
+        "artboards": artboards,  # 新增：画板信息列表
         "timestamp": datetime.now().isoformat()
     }
     
@@ -171,6 +376,23 @@ def analyze_psd(psd_path: str | Path) -> Dict[str, Any]:
     print(f"   图层总数: {statistics['total_layers']}")
     print(f"   智能对象数量: {statistics['total_smart_objects']}")
     print(f"   画板数量: {statistics['artboard_count']}")
+    
+    # 画板信息
+    if artboards:
+        print(f"\n🎨 画板列表:")
+        for i, artboard in enumerate(artboards, 1):
+            print(f"   {i}. {artboard['name']} (路径: {artboard['path']})")
+            size = artboard.get('size', {})
+            if size:
+                print(f"      尺寸: {size.get('width', 0)} x {size.get('height', 0)} 像素")
+            pos = artboard.get('position', {})
+            if pos:
+                print(f"      位置: ({pos.get('x', 0)}, {pos.get('y', 0)})")
+            so_count = artboard.get('smart_object_count', 0)
+            print(f"      智能对象数量: {so_count}")
+            if so_count > 0:
+                for j, so in enumerate(artboard.get('smart_objects', []), 1):
+                    print(f"         {j}. {so['name']} - {so.get('size', {}).get('width', 0)}x{so.get('size', {}).get('height', 0)} @ ({so.get('position', {}).get('x', 0)}, {so.get('position', {}).get('y', 0)})")
     
     # 智能对象列表
     if smart_objects:
@@ -466,41 +688,25 @@ def _count_artboards(psd: PSDImage) -> int:
     """
     统计画板数量。
     
-    规则：
-    1. 如果是带有 artboard / is_artboard 标记的 Group，则视为真实的 Photoshop 画板；
-    2. 此外，顶层的 Group（depth == 0）也视为一个“逻辑画板”，方便业务把每个大组当作一个版位。
+    规则：最外层的图层组就是画板，有几个最外层图层组就统计为几个画板。
     """
     artboard_count = 0
 
-    def traverse(layers, depth: int):
-        nonlocal artboard_count
-        for layer in layers:
+    try:
+        top_level_layers = []
+        if hasattr(psd, "__iter__"):
+            top_level_layers = list(psd)
+        elif hasattr(psd, "layers"):
+            top_level_layers = list(psd.layers)
+        
+        for layer in top_level_layers:
             try:
+                # 只统计最外层的图层组
                 is_group = isinstance(layer, Group) or (hasattr(layer, "is_group") and layer.is_group())
-
-                is_real_artboard = False
-                try:
-                    if hasattr(layer, "artboard") and layer.artboard:
-                        is_real_artboard = True
-                    elif hasattr(layer, "is_artboard") and getattr(layer, "is_artboard"):
-                        is_real_artboard = True
-                except Exception:
-                    is_real_artboard = False
-
-                # 真·画板 或 顶层组 -> 计为一个画板
-                if is_real_artboard or (is_group and depth == 0):
+                if is_group:
                     artboard_count += 1
-
-                if is_group and hasattr(layer, "__iter__"):
-                    traverse(layer, depth + 1)
             except Exception:
                 continue
-
-    try:
-        if hasattr(psd, "__iter__"):
-            traverse(psd, 0)
-        elif hasattr(psd, "layers"):
-            traverse(psd.layers, 0)
     except Exception:
         pass
 

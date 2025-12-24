@@ -430,10 +430,236 @@
               <div class="ui dividing header" style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
                 <span>分析结果</span>
                 <div style="display: flex; gap: 6px;">
+                  <button class="ui tiny primary button" @click="toggleVisualization">
+                    <i :class="state.showVisualization ? 'eye slash' : 'eye' + ' icon'"></i>
+                    {{ state.showVisualization ? '隐藏可视化' : '查看可视化' }}
+                  </button>
                   <button class="ui tiny button" @click="copyAnalyzeResultRaw">复制 JSON</button>
                   <button class="ui tiny button" @click="copyAnalyzeResultEval">复制 JS 表达式</button>
                 </div>
               </div>
+              
+              <!-- 可视化展示 -->
+              <div v-if="state.showVisualization && state.analyzeData" style="margin-top: 1.5rem; margin-bottom: 1.5rem;">
+                <div class="ui segment" style="background: #f9f9f9;">
+                  <h4 class="ui header">
+                    <i class="image icon"></i>
+                    <div class="content">
+                      PSD 可视化预览
+                      <div class="sub header">整体尺寸、画板信息和智能对象详情</div>
+                    </div>
+                  </h4>
+                  
+                  <!-- 可视化预览区域 -->
+                  <div v-if="state.analyzeData.artboards && state.analyzeData.artboards.length > 0" style="margin-top: 1.5rem; margin-bottom: 1.5rem;">
+                    <div style="background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; padding: 1rem; overflow: auto; max-height: 600px;">
+                      <!-- 文档容器 -->
+                      <div 
+                        ref="documentContainer"
+                        :style="{
+                          position: 'relative',
+                          width: containerWidth + 'px',
+                          height: containerHeight + 'px',
+                          margin: '0 auto',
+                          background: 'repeating-linear-gradient(45deg, #f5f5f5, #f5f5f5 10px, #fff 10px, #fff 20px)',
+                          border: '2px dashed #999',
+                          boxSizing: 'border-box'
+                        }"
+                      >
+                        <!-- 画板列表（相对于文档容器定位） -->
+                        <div
+                          v-for="(artboard, artboardIndex) in state.analyzeData.artboards"
+                          :key="'artboard-' + artboardIndex"
+                          :style="{
+                            position: 'absolute',
+                            left: ((artboard.position.left !== undefined ? artboard.position.left : artboard.position.x || 0) * containerScale) + 'px',
+                            top: ((artboard.position.top !== undefined ? artboard.position.top : artboard.position.y || 0) * containerScale) + 'px',
+                            width: (artboard.size.width * containerScale) + 'px',
+                            height: (artboard.size.height * containerScale) + 'px',
+                            backgroundColor: artboard.visible ? '#e3f2fd' : '#f5f5f5',
+                            border: '2px solid ' + (artboard.visible ? '#2196f3' : '#999'),
+                            boxSizing: 'border-box',
+                            overflow: 'visible'
+                          }"
+                          :title="'画板 ' + (artboardIndex + 1) + ': ' + artboard.name + ' (' + artboard.size.width + ' x ' + artboard.size.height + ' px)'"
+                        >
+                          <!-- 画板标签 -->
+                          <div style="position: absolute; top: 0; left: 0; background: rgba(33, 150, 243, 0.9); color: #fff; padding: 2px 6px; font-size: 11px; font-weight: bold; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; z-index: 10;">
+                            画板 {{ artboardIndex + 1 }}: {{ artboard.name }}
+                          </div>
+                          
+                          <!-- 画板尺寸标签 -->
+                          <div style="position: absolute; top: 18px; left: 0; background: rgba(255, 255, 255, 0.9); color: #666; padding: 1px 4px; font-size: 9px; white-space: nowrap; z-index: 10;">
+                            {{ artboard.size.width }} x {{ artboard.size.height }} px
+                          </div>
+                        </div>
+                        
+                        <!-- 智能对象列表（相对于文档容器定位） -->
+                        <div
+                          v-for="(artboard, artboardIndex) in state.analyzeData.artboards"
+                          :key="'artboard-so-' + artboardIndex"
+                        >
+                          <div
+                            v-for="(so, soIndex) in artboard.smart_objects"
+                            :key="'so-' + artboardIndex + '-' + soIndex"
+                            :style="{
+                              position: 'absolute',
+                              left: ((so.position.left !== undefined ? so.position.left : so.position.x || 0) * containerScale) + 'px',
+                              top: ((so.position.top !== undefined ? so.position.top : so.position.y || 0) * containerScale) + 'px',
+                              width: (so.size.width * containerScale) + 'px',
+                              height: (so.size.height * containerScale) + 'px',
+                              backgroundColor: so.visible ? '#fff3e0' : '#f5f5f5',
+                              border: '1.5px solid ' + (so.visible ? '#ff9800' : '#999'),
+                              boxSizing: 'border-box',
+                              overflow: 'visible',
+                              zIndex: 5
+                            }"
+                            :title="so.name + ' (' + so.size.width + ' x ' + so.size.height + ' px) @ (' + (so.position.left !== undefined ? so.position.left : so.position.x || 0) + ', ' + (so.position.top !== undefined ? so.position.top : so.position.y || 0) + ')'"
+                          >
+                            <!-- 智能对象标签（如果空间足够） -->
+                            <div 
+                              v-if="(so.size.width * containerScale) > 60 && (so.size.height * containerScale) > 20"
+                              style="position: absolute; top: 0; left: 0; background: rgba(255, 152, 0, 0.9); color: #fff; padding: 1px 4px; font-size: 9px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; z-index: 1;"
+                            >
+                              {{ so.name.length > 15 ? so.name.substring(0, 15) + '...' : so.name }}
+                            </div>
+                            
+                            <!-- 智能对象尺寸（如果空间足够） -->
+                            <div 
+                              v-if="(so.size.width * containerScale) > 80 && (so.size.height * containerScale) > 35"
+                              style="position: absolute; top: 14px; left: 0; background: rgba(255, 255, 255, 0.9); color: #666; padding: 1px 3px; font-size: 8px; white-space: nowrap; z-index: 1;"
+                            >
+                              {{ so.size.width }}x{{ so.size.height }}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div style="text-align: center; margin-top: 0.5rem; color: #666; font-size: 0.85em;">
+                      <p>缩放比例: {{ containerScale.toFixed(2) }}x | 文档尺寸: {{ state.analyzeData.document_info.width }} x {{ state.analyzeData.document_info.height }} px | 容器尺寸: {{ containerWidth }} x {{ containerHeight }} px</p>
+                    </div>
+                  </div>
+                  
+                  <!-- 整体信息 -->
+                  <div class="ui two column grid" style="margin-top: 1rem;">
+                    <div class="column">
+                      <div class="ui card" style="width: 100%;">
+                        <div class="content">
+                          <div class="header">整体尺寸</div>
+                          <div class="description" style="margin-top: 0.5rem;">
+                            <p><strong>宽度:</strong> {{ state.analyzeData.document_info.width }} px</p>
+                            <p><strong>高度:</strong> {{ state.analyzeData.document_info.height }} px</p>
+                            <p v-if="state.analyzeData.document_info.resolution">
+                              <strong>分辨率:</strong> {{ state.analyzeData.document_info.resolution.horizontal }} x {{ state.analyzeData.document_info.resolution.vertical }} {{ state.analyzeData.document_info.resolution.unit }}
+                            </p>
+                            <p><strong>颜色模式:</strong> {{ state.analyzeData.document_info.color_mode }}</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="column">
+                      <div class="ui card" style="width: 100%;">
+                        <div class="content">
+                          <div class="header">统计信息</div>
+                          <div class="description" style="margin-top: 0.5rem;">
+                            <p><strong>画板数量:</strong> {{ state.analyzeData.statistics.artboard_count }}</p>
+                            <p><strong>智能对象数量:</strong> {{ state.analyzeData.statistics.total_smart_objects }}</p>
+                            <p><strong>图层总数:</strong> {{ state.analyzeData.statistics.total_layers }}</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <!-- 画板列表 -->
+                  <div v-if="state.analyzeData.artboards && state.analyzeData.artboards.length > 0" style="margin-top: 1.5rem;">
+                    <h4 class="ui dividing header">画板列表 ({{ state.analyzeData.artboards.length }})</h4>
+                    <div class="ui cards">
+                      <div v-for="(artboard, index) in state.analyzeData.artboards" :key="index" class="ui card" style="width: 100%; margin-bottom: 1rem;">
+                        <div class="content">
+                          <div class="header">
+                            <i class="square outline icon"></i>
+                            画板 {{ index + 1 }}: {{ artboard.name }}
+                          </div>
+                          <div class="meta" style="margin-top: 0.5rem;">
+                            <span class="date">路径: {{ artboard.path }}</span>
+                          </div>
+                          <div class="description" style="margin-top: 1rem;">
+                            <div class="ui two column grid">
+                              <div class="column">
+                                <p><strong>尺寸:</strong> {{ artboard.size.width }} x {{ artboard.size.height }} px</p>
+                                <p><strong>位置:</strong> ({{ artboard.position.x }}, {{ artboard.position.y }})</p>
+                                <p><strong>宽高比:</strong> {{ artboard.size.aspect_ratio }}</p>
+                              </div>
+                              <div class="column">
+                                <p><strong>智能对象数量:</strong> {{ artboard.smart_object_count }}</p>
+                                <p><strong>可见:</strong> {{ artboard.visible ? '是' : '否' }}</p>
+                              </div>
+                            </div>
+                            
+                            <!-- 画板中的智能对象 -->
+                            <div v-if="artboard.smart_objects && artboard.smart_objects.length > 0" style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #e0e0e0;">
+                              <h5 class="ui header" style="font-size: 0.9em; margin-bottom: 0.75rem;">
+                                <i class="object ungroup icon"></i>
+                                智能对象 ({{ artboard.smart_objects.length }})
+                              </h5>
+                              <div class="ui relaxed divided list">
+                                <div v-for="(so, soIndex) in artboard.smart_objects" :key="soIndex" class="item" style="padding: 0.75rem;">
+                                  <div class="content">
+                                    <div class="header" style="font-size: 0.9em;">
+                                      {{ soIndex + 1 }}. {{ so.name }}
+                                    </div>
+                                    <div class="description" style="margin-top: 0.5rem; font-size: 0.85em; color: #666;">
+                                      <p><strong>路径:</strong> {{ so.path }}</p>
+                                      <p><strong>尺寸:</strong> {{ so.size.width }} x {{ so.size.height }} px</p>
+                                      <p><strong>位置:</strong> ({{ so.position.x }}, {{ so.position.y }})</p>
+                                      <p><strong>可见:</strong> {{ so.visible ? '是' : '否' }}</p>
+                                      <p v-if="so.opacity !== undefined"><strong>不透明度:</strong> {{ roundPercent(so.opacity) }}%</p>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                            <div v-else style="margin-top: 1rem; padding: 0.75rem; background: #f5f5f5; border-radius: 4px; color: #999; font-size: 0.9em;">
+                              此画板中没有智能对象
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <!-- 没有画板的情况 -->
+                  <div v-else style="margin-top: 1.5rem; padding: 1.5rem; background: #f5f5f5; border-radius: 4px; text-align: center; color: #999;">
+                    <i class="square outline icon" style="font-size: 2em; margin-bottom: 0.5rem;"></i>
+                    <p>此 PSD 文件中没有检测到画板</p>
+                    <p style="font-size: 0.9em; margin-top: 0.5rem;">所有智能对象将显示在下方</p>
+                  </div>
+                  
+                  <!-- 所有智能对象列表（如果没有画板） -->
+                  <div v-if="(!state.analyzeData.artboards || state.analyzeData.artboards.length === 0) && state.analyzeData.smart_objects && state.analyzeData.smart_objects.length > 0" style="margin-top: 1.5rem;">
+                    <h4 class="ui dividing header">所有智能对象 ({{ state.analyzeData.smart_objects.length }})</h4>
+                    <div class="ui relaxed divided list">
+                      <div v-for="(so, index) in state.analyzeData.smart_objects" :key="index" class="item" style="padding: 1rem;">
+                        <div class="content">
+                          <div class="header">
+                            {{ index + 1 }}. {{ so.name }}
+                          </div>
+                          <div class="description" style="margin-top: 0.5rem; font-size: 0.9em; color: #666;">
+                            <p><strong>路径:</strong> {{ so.path }}</p>
+                            <p><strong>尺寸:</strong> {{ so.size.width }} x {{ so.size.height }} px</p>
+                            <p><strong>位置:</strong> ({{ so.position.x }}, {{ so.position.y }})</p>
+                            <p><strong>可见:</strong> {{ so.visible ? '是' : '否' }}</p>
+                            <p v-if="so.opacity !== undefined"><strong>不透明度:</strong> {{ Math.round(so.opacity * 100) }}%</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- JSON 输出 -->
               <div class="code-output">{{ state.analyzeResult }}</div>
             </div>
           </div>
@@ -609,7 +835,7 @@
         return;
       }
       
-      const { createApp, reactive, watch, onMounted, computed } = Vue;
+      const { createApp, reactive, watch, onMounted, computed, ref } = Vue;
 
     // localStorage 键名常量
     const STORAGE_KEYS = {
@@ -671,6 +897,8 @@
             ]
           },
           analyzeResult: '',
+          analyzeData: null, // 解析后的分析数据（用于可视化）
+          showVisualization: false, // 是否显示可视化
           processResult: '',
           debugLogs: [], // 调试日志数组
           loading: {
@@ -932,9 +1160,17 @@
           try {
             const { data } = await client().post('/analyzePsd', { psd_path: state.analyze.psd_path });
             state.analyzeResult = pretty(data);
+            state.analyzeData = data; // 保存解析后的数据用于可视化
+            state.showVisualization = true; // 自动显示可视化
             addDebugLog('PSD 分析成功', 'success');
+            // 延迟计算容器尺寸，确保 DOM 已更新
+            setTimeout(() => {
+              calculateContainerSize();
+            }, 200);
           } catch (e) {
             state.analyzeResult = '';
+            state.analyzeData = null;
+            state.showVisualization = false;
             addDebugLog(`PSD 分析失败: ${pretty(e.response?.data || e.message)}`, 'error');
           } finally {
             state.loading.analyze = false;
@@ -1068,6 +1304,72 @@
           }
         }
 
+        // 工具函数：将不透明度转换为百分比
+        function roundPercent(opacity) {
+          if (opacity === undefined || opacity === null) return 0;
+          return Math.round(opacity * 100);
+        }
+
+
+        // 容器相关状态
+        const containerWidth = ref(800);
+        const containerHeight = ref(600);
+        const containerScale = ref(1);
+        const documentContainer = ref(null);
+
+        // 计算容器尺寸和缩放比例
+        function calculateContainerSize() {
+          if (!state.analyzeData || !state.analyzeData.artboards || state.analyzeData.artboards.length === 0) {
+            containerWidth.value = 800;
+            containerHeight.value = 600;
+            containerScale.value = 1;
+            return;
+          }
+
+          const docWidth = state.analyzeData.document_info.width;
+          const docHeight = state.analyzeData.document_info.height;
+
+          // 计算缩放比例以适应显示区域
+          const maxContainerWidth = 1200;
+          const maxContainerHeight = 600;
+          const scaleX = maxContainerWidth / docWidth;
+          const scaleY = maxContainerHeight / docHeight;
+          const scale = Math.min(scaleX, scaleY, 1); // 不超过 1，不放大
+          
+          containerScale.value = scale;
+          containerWidth.value = Math.min(docWidth * scale, maxContainerWidth);
+          containerHeight.value = Math.min(docHeight * scale, maxContainerHeight);
+        }
+
+        // 切换可视化显示
+        function toggleVisualization() {
+          state.showVisualization = !state.showVisualization;
+          if (state.showVisualization && state.analyzeData) {
+            // 延迟计算，确保 DOM 已更新
+            setTimeout(() => {
+              calculateContainerSize();
+            }, 100);
+          }
+        }
+
+        // 监听 analyzeData 变化，自动计算容器尺寸
+        watch(() => state.analyzeData, () => {
+          if (state.showVisualization && state.analyzeData) {
+            setTimeout(() => {
+              calculateContainerSize();
+            }, 100);
+          }
+        }, { deep: true });
+
+        // 监听 showVisualization 变化
+        watch(() => state.showVisualization, (newVal) => {
+          if (newVal && state.analyzeData) {
+            setTimeout(() => {
+              calculateContainerSize();
+            }, 100);
+          }
+        });
+
         return {
           state,
           menuItems,
@@ -1085,7 +1387,14 @@
           copyAnalyzeResultEval,
           addSmartObject,
           removeSmartObject,
-          clearDebugLog
+          clearDebugLog,
+          roundPercent,
+          toggleVisualization,
+          containerWidth,
+          containerHeight,
+          containerScale,
+          documentContainer,
+          calculateContainerSize
         };
       }
     }).mount('#app');
