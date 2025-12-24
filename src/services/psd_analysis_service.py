@@ -16,6 +16,47 @@ except ImportError:
     Group = None
 
 
+def _print_layer_structure(layer_structure: List[Dict[str, Any]], indent: str = "", is_last: bool = True):
+    """
+    递归打印图层结构树
+    
+    Args:
+        layer_structure: 图层结构列表
+        indent: 当前缩进
+        is_last: 是否是最后一个节点
+    """
+    for i, layer in enumerate(layer_structure):
+        is_last_layer = i == len(layer_structure) - 1
+        
+        # 选择连接符
+        connector = "└── " if is_last_layer else "├── "
+        next_indent = indent + ("    " if is_last_layer else "│   ")
+        
+        # 获取图层类型标记
+        layer_type = layer.get("type", "layer")
+        type_markers = {
+            "group": "[组]",
+            "smart_object": "[智能对象]",
+            "layer": "[图层]"
+        }
+        type_marker = type_markers.get(layer_type, f"[{layer_type}]")
+        
+        # 画板标记
+        artboard_marker = " [画板]" if layer.get("is_artboard", False) else ""
+        
+        # 可见性标记
+        visible_marker = "" if layer.get("visible", True) else " [隐藏]"
+        
+        # 打印图层信息
+        layer_name = layer.get("name", "未知图层")
+        print(f"{indent}{connector}{type_marker}{artboard_marker} {layer_name}{visible_marker}")
+        
+        # 如果有子图层，递归打印
+        children = layer.get("children", [])
+        if children:
+            _print_layer_structure(children, next_indent, is_last_layer)
+
+
 def analyze_psd(psd_path: str | Path) -> Dict[str, Any]:
     """
     分析 PSD 文件，提取整体信息和智能对象详细信息
@@ -93,7 +134,8 @@ def analyze_psd(psd_path: str | Path) -> Dict[str, Any]:
         "file_size_mb": round(psd_path.stat().st_size / 1024 / 1024, 2)
     }
     
-    return {
+    # 构建结果字典
+    result = {
         "file_info": file_info,
         "document_info": document_info,
         "smart_objects": smart_objects,
@@ -101,6 +143,56 @@ def analyze_psd(psd_path: str | Path) -> Dict[str, Any]:
         "layer_structure": layer_structure,
         "timestamp": datetime.now().isoformat()
     }
+    
+    # 在控制台打印结构信息
+    print("\n" + "=" * 80)
+    print(f"📄 PSD 文件分析结果: {file_info['file_name']}")
+    print("=" * 80)
+    
+    # 文件基本信息
+    print(f"\n📋 文件信息:")
+    print(f"   路径: {file_info['file_path']}")
+    print(f"   大小: {file_info['file_size_mb']} MB ({file_info['file_size']} 字节)")
+    
+    # 文档信息
+    print(f"\n📐 文档信息:")
+    print(f"   尺寸: {document_info['width']} x {document_info['height']} 像素")
+    if 'resolution' in document_info:
+        res = document_info['resolution']
+        print(f"   分辨率: {res['horizontal']} x {res['vertical']} {res.get('unit', 'pixels/inch')}")
+    print(f"   颜色模式: {document_info['color_mode']}")
+    if document_info.get('depth'):
+        print(f"   深度: {document_info['depth']} 位")
+    if document_info.get('channels'):
+        print(f"   通道数: {document_info['channels']}")
+    
+    # 统计信息
+    print(f"\n📊 统计信息:")
+    print(f"   图层总数: {statistics['total_layers']}")
+    print(f"   智能对象数量: {statistics['total_smart_objects']}")
+    print(f"   画板数量: {statistics['artboard_count']}")
+    
+    # 智能对象列表
+    if smart_objects:
+        print(f"\n🎯 智能对象列表:")
+        for i, so in enumerate(smart_objects, 1):
+            print(f"   {i}. {so['name']} (路径: {so['path']})")
+            size = so.get('size', {})
+            if size:
+                print(f"      尺寸: {size.get('width', 0)} x {size.get('height', 0)} 像素")
+            pos = so.get('position', {})
+            if pos:
+                print(f"      位置: ({pos.get('x', 0)}, {pos.get('y', 0)})")
+            print(f"      可见: {'是' if so.get('visible', True) else '否'}")
+    
+    # 图层结构树
+    if layer_structure:
+        print(f"\n🌳 图层结构:")
+        _print_layer_structure(layer_structure)
+    
+    print("\n" + "=" * 80 + "\n")
+    
+    return result
 
 
 def _extract_smart_objects(psd: PSDImage, parent_path: str = "") -> List[Dict[str, Any]]:
