@@ -5,10 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PSD 智能对象服务控制台</title>
   <!-- Semantic UI CSS -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/semantic-ui@2.5.0/dist/semantic.min.css">
+  <link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/semantic-ui/2.5.0/semantic.min.css">
+  <!-- jQuery (Semantic UI 依赖) -->
+  <script src="https://cdn.bootcdn.net/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
   <!-- Vue 3 & axios CDN -->
-  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/axios@1.7.7/dist/axios.min.js"></script>
+  <script src="https://cdn.bootcdn.net/ajax/libs/vue/3.3.4/vue.global.js"></script>
+  <script src="https://cdn.bootcdn.net/ajax/libs/axios/1.7.7/axios.min.js"></script>
   <style>
     body {
       margin: 0;
@@ -21,7 +23,7 @@
       min-height: 100vh;
     }
     .sidebar {
-      width: 200px;
+      width: 220px;
       background: #1b1c1d;
       color: #fff;
       position: fixed;
@@ -40,10 +42,36 @@
       margin: 0;
       font-size: 1rem;
     }
+    .sidebar-menu {
+      padding: 0.5rem 0;
+    }
+    .menu-item {
+      padding: 0.75rem 1rem;
+      cursor: pointer;
+      transition: background-color 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      color: rgba(255, 255, 255, 0.8);
+      border-left: 3px solid transparent;
+    }
+    .menu-item:hover {
+      background-color: rgba(255, 255, 255, 0.1);
+      color: #fff;
+    }
+    .menu-item.active {
+      background-color: rgba(33, 133, 208, 0.2);
+      color: #fff;
+      border-left-color: #2185d0;
+    }
+    .menu-item i {
+      width: 20px;
+      text-align: center;
+    }
     .main-content {
       flex: 1;
-      margin-left: 200px;
-      margin-right: 350px;
+      margin-left: 220px;
+      margin-right: 360px;
       padding: 1rem 1.5rem;
     }
     .section {
@@ -63,7 +91,7 @@
       word-wrap: break-word;
     }
     .debug-panel {
-      width: 340px;
+      width: 360px;
       background: #fff;
       position: fixed;
       right: 0;
@@ -73,6 +101,8 @@
       z-index: 999;
       border-left: 1px solid #e0e0e0;
       box-shadow: -2px 0 4px rgba(0, 0, 0, 0.1);
+      display: flex;
+      flex-direction: column;
     }
     .debug-panel-header {
       padding: 1rem;
@@ -83,7 +113,65 @@
       z-index: 10;
     }
     .debug-panel-content {
+      flex: 1;
       padding: 1rem;
+      overflow-y: auto;
+    }
+    .debug-tabs {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 0.75rem;
+      border-bottom: 1px solid #e0e0e0;
+      padding-bottom: 0.5rem;
+    }
+    .debug-tab {
+      padding: 0.4rem 0.8rem;
+      cursor: pointer;
+      border-radius: 4px;
+      font-size: 0.85em;
+      transition: background-color 0.2s;
+      color: #666;
+    }
+    .debug-tab:hover {
+      background-color: #f0f0f0;
+    }
+    .debug-tab.active {
+      background-color: #2185d0;
+      color: #fff;
+    }
+    .debug-log {
+      background: #1e1e1e;
+      color: #d4d4d4;
+      padding: 0.75rem;
+      border-radius: 4px;
+      font-family: "Consolas", "Monaco", "Courier New", monospace;
+      font-size: 0.75rem;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      max-height: calc(100vh - 280px);
+      overflow-y: auto;
+    }
+    .debug-log-item {
+      margin-bottom: 0.5rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    .debug-log-item:last-child {
+      border-bottom: none;
+    }
+    .debug-log-time {
+      color: #888;
+      font-size: 0.7em;
+      margin-bottom: 0.25rem;
+    }
+    .debug-log-content {
+      color: #d4d4d4;
+    }
+    .debug-log-content.error {
+      color: #f44336;
+    }
+    .debug-log-content.success {
+      color: #4caf50;
     }
     .status-indicator {
       display: inline-flex;
@@ -149,6 +237,15 @@
       font-size: 0.85em;
       padding: 0.6em 0.8em;
     }
+    .view-container {
+      display: none;
+    }
+    .view-container.active {
+      display: block;
+    }
+    .clear-log-btn {
+      margin-left: auto;
+    }
     @media (max-width: 1200px) {
       .debug-panel {
         display: none;
@@ -182,243 +279,263 @@
             PSD 服务控制台
           </h2>
         </div>
+        <div class="sidebar-menu">
+          <div 
+            v-for="item in menuItems" 
+            :key="item.id"
+            class="menu-item"
+            :class="{ active: state.currentView === item.id }"
+            @click="switchView(item.id)"
+          >
+            <i :class="item.icon + ' icon'"></i>
+            <span>{{ item.name }}</span>
+          </div>
+        </div>
       </aside>
 
       <!-- 右侧主体内容 -->
       <main class="main-content">
-        <!-- 使用指南 -->
-        <div class="section">
-          <h1 class="ui header">
-            <i class="book icon"></i>
-            <div class="content">
-              使用指南
-              <div class="sub header">了解如何使用 PSD 智能对象服务</div>
-            </div>
-          </h1>
-
-          <div class="ui two column grid">
-            <div class="column">
-              <div class="ui segment">
-                <h3 class="ui header">操作步骤</h3>
-                <ol class="ui list">
-                  <li>先配置 API 地址与超时，点击健康检查。</li>
-                  <li>如需 Photoshop 支持，先"启动 Photoshop"再检测状态。</li>
-                  <li>分析 PSD 结构（/analyzePsd），确认智能对象信息。</li>
-                  <li>填写处理参数，执行 /processPsd 完成替换导出。</li>
-                  <li>调试输出区查看最近请求和错误信息。</li>
-                </ol>
+        <!-- 首页/使用指南 -->
+        <div class="view-container" :class="{ active: state.currentView === 'home' }">
+          <div class="section">
+            <h1 class="ui header">
+              <i class="book icon"></i>
+              <div class="content">
+                使用指南
+                <div class="sub header">了解如何使用 PSD 智能对象服务</div>
               </div>
-            </div>
-            <div class="column">
-              <div class="ui segment">
-                <h3 class="ui header">注意事项</h3>
-                <ul class="ui list">
-                  <li>路径需为本机有效 Windows 路径（示例：<code>D:\path\file.psd</code>）</li>
-                  <li>避免包含 <code>&lt;&gt;:"|?*</code> 等非法字符</li>
-                  <li>确保 Photoshop 已正确安装并可访问</li>
-                  <li>建议以管理员权限运行服务，避免权限问题</li>
-                </ul>
+            </h1>
+
+            <div class="ui two column grid">
+              <div class="column">
+                <div class="ui segment">
+                  <h3 class="ui header">操作步骤</h3>
+                  <ol class="ui list">
+                    <li>先配置 API 地址与超时，点击健康检查。</li>
+                    <li>如需 Photoshop 支持，先"启动 Photoshop"再检测状态。</li>
+                    <li>分析 PSD 结构（/analyzePsd），确认智能对象信息。</li>
+                    <li>填写处理参数，执行 /processPsd 完成替换导出。</li>
+                    <li>调试输出区查看最近请求和错误信息。</li>
+                  </ol>
+                </div>
+              </div>
+              <div class="column">
+                <div class="ui segment">
+                  <h3 class="ui header">注意事项</h3>
+                  <ul class="ui list">
+                    <li>路径需为本机有效 Windows 路径（示例：<code>D:\path\file.psd</code>）</li>
+                    <li>避免包含 <code>&lt;&gt;:"|?*</code> 等非法字符</li>
+                    <li>确保 Photoshop 已正确安装并可访问</li>
+                    <li>建议以管理员权限运行服务，避免权限问题</li>
+                  </ul>
+                </div>
               </div>
             </div>
           </div>
         </div>
 
         <!-- 服务配置 -->
-        <div class="section">
-          <h1 class="ui header">
-            <i class="cog icon"></i>
-            <div class="content">
-              服务配置
-              <div class="sub header">配置 API 地址和 Photoshop 服务</div>
-            </div>
-          </h1>
+        <div class="view-container" :class="{ active: state.currentView === 'config' }">
+          <div class="section">
+            <h1 class="ui header">
+              <i class="cog icon"></i>
+              <div class="content">
+                服务配置
+                <div class="sub header">配置 API 地址和 Photoshop 服务</div>
+              </div>
+            </h1>
 
-          <div class="ui segment">
-            <h3 class="ui dividing header">API 配置</h3>
-            <div class="ui small form">
-              <div class="two fields">
-                <div class="field form-field">
-                  <label>Photoshop 启动超时（秒）</label>
-                  <input type="number" min="5" max="120" v-model.number="state.startTimeout" />
-                </div>
-                <div class="field form-field">
-                  <label>端点速查</label>
-                  <div class="ui small message" style="margin-top: 0;">
-                    <small>
-                      /health · /photoshopStatus · /analyzePsd<br>
-                      /processPsd · /startPhotoshop<br>
-                      /stopPhotoshop · /restartPhotoshop
-                    </small>
+            <div class="ui segment">
+              <h3 class="ui dividing header">API 配置</h3>
+              <div class="ui small form">
+                <div class="two fields">
+                  <div class="field form-field">
+                    <label>Photoshop 启动超时（秒）</label>
+                    <input type="number" min="5" max="120" v-model.number="state.startTimeout" />
+                  </div>
+                  <div class="field form-field">
+                    <label>端点速查</label>
+                    <div class="ui small message" style="margin-top: 0;">
+                      <small>
+                        /health · /photoshopStatus · /analyzePsd<br>
+                        /processPsd · /startPhotoshop<br>
+                        /stopPhotoshop · /restartPhotoshop
+                      </small>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
-          </div>
 
-          <div class="ui segment">
-            <h3 class="ui dividing header">服务操作</h3>
-            <div class="ui small buttons">
-              <button class="ui small button" :class="{ loading: state.loading.health }" @click="checkHealth" :disabled="state.loading.health">
-                健康检查
-              </button>
-              <button class="ui small primary button" :class="{ loading: state.loading.startPs }" @click="startPhotoshop" :disabled="state.loading.startPs">
-                启动 Photoshop
-              </button>
-              <button class="ui small red button" :class="{ loading: state.loading.stopPs }" @click="stopPhotoshop" :disabled="state.loading.stopPs">
-                关闭 Photoshop
-              </button>
-              <button class="ui small button" :class="{ loading: state.loading.restartPs }" @click="restartPhotoshop" :disabled="state.loading.restartPs">
-                重启 Photoshop
-              </button>
-              <button class="ui small button" :class="{ loading: state.loading.checkPs }" @click="checkPhotoshop" :disabled="state.loading.checkPs">
-                检测 Photoshop 状态
-              </button>
-            </div>
-            <div style="margin-top: 1rem;">
-              <span class="status-indicator">
-                <span class="status-dot" :class="{'ok': state.healthOk, 'fail': state.healthOk === false}"></span>
-                <span>健康状态：{{ state.healthOk === null ? '未知' : (state.healthOk ? '正常' : '异常') }}</span>
-              </span>
-              <div class="ui small checkbox" style="margin-left: 1rem;">
-                <input type="checkbox" id="testConnection" v-model="state.testConnection" />
-                <label for="testConnection">Photoshop 连接深度检测 (test_connection=true)</label>
+            <div class="ui segment">
+              <h3 class="ui dividing header">服务操作</h3>
+              <div class="ui small buttons">
+                <button class="ui small button" :class="{ loading: state.loading.health }" @click="checkHealth" :disabled="state.loading.health">
+                  健康检查
+                </button>
+                <button class="ui small primary button" :class="{ loading: state.loading.startPs }" @click="startPhotoshop" :disabled="state.loading.startPs">
+                  启动 Photoshop
+                </button>
+                <button class="ui small red button" :class="{ loading: state.loading.stopPs }" @click="stopPhotoshop" :disabled="state.loading.stopPs">
+                  关闭 Photoshop
+                </button>
+                <button class="ui small button" :class="{ loading: state.loading.restartPs }" @click="restartPhotoshop" :disabled="state.loading.restartPs">
+                  重启 Photoshop
+                </button>
+                <button class="ui small button" :class="{ loading: state.loading.checkPs }" @click="checkPhotoshop" :disabled="state.loading.checkPs">
+                  检测 Photoshop 状态
+                </button>
+              </div>
+              <div style="margin-top: 1rem;">
+                <span class="status-indicator">
+                  <span class="status-dot" :class="{'ok': state.healthOk, 'fail': state.healthOk === false}"></span>
+                  <span>健康状态：{{ state.healthOk === null ? '未知' : (state.healthOk ? '正常' : '异常') }}</span>
+                </span>
+                <div class="ui small checkbox" style="margin-left: 1rem;">
+                  <input type="checkbox" id="testConnection" v-model="state.testConnection" />
+                  <label for="testConnection">Photoshop 连接深度检测 (test_connection=true)</label>
+                </div>
               </div>
             </div>
           </div>
         </div>
 
         <!-- PSD 分析 -->
-        <div class="section">
-          <h1 class="ui header">
-            <i class="search icon"></i>
-            <div class="content">
-              PSD 分析
-              <div class="sub header">分析 PSD 文件结构和智能对象信息</div>
-            </div>
-          </h1>
+        <div class="view-container" :class="{ active: state.currentView === 'analyze' }">
+          <div class="section">
+            <h1 class="ui header">
+              <i class="search icon"></i>
+              <div class="content">
+                PSD 分析
+                <div class="sub header">分析 PSD 文件结构和智能对象信息</div>
+              </div>
+            </h1>
 
-          <div class="ui segment">
-            <h3 class="ui dividing header">分析参数</h3>
-            <div class="ui small form">
-              <div class="field form-field">
-                <label>PSD 文件路径</label>
-                <input type="text" v-model="state.analyze.psd_path" placeholder="D:\path\to\file.psd" />
-              </div>
-              <div style="margin-top: 1rem;">
-                <button class="ui small primary button" :class="{ loading: state.loading.analyze }" @click="analyzePsd" :disabled="state.loading.analyze">
-                  开始分析
-                </button>
+            <div class="ui segment">
+              <h3 class="ui dividing header">分析参数</h3>
+              <div class="ui small form">
+                <div class="field form-field">
+                  <label>PSD 文件路径</label>
+                  <input type="text" v-model="state.analyze.psd_path" placeholder="D:\path\to\file.psd" />
+                </div>
+                <div style="margin-top: 1rem;">
+                  <button class="ui small primary button" :class="{ loading: state.loading.analyze }" @click="analyzePsd" :disabled="state.loading.analyze">
+                    开始分析
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
 
-          <div v-if="state.analyzeResult" class="ui segment" style="margin-top: 1.5rem;">
-            <div class="ui dividing header" style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
-              <span>分析结果</span>
-              <div style="display: flex; gap: 6px;">
-                <button class="ui tiny button" @click="copyAnalyzeResultRaw">复制 JSON</button>
-                <button class="ui tiny button" @click="copyAnalyzeResultEval">复制 JS 表达式</button>
+            <div v-if="state.analyzeResult" class="ui segment" style="margin-top: 1.5rem;">
+              <div class="ui dividing header" style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+                <span>分析结果</span>
+                <div style="display: flex; gap: 6px;">
+                  <button class="ui tiny button" @click="copyAnalyzeResultRaw">复制 JSON</button>
+                  <button class="ui tiny button" @click="copyAnalyzeResultEval">复制 JS 表达式</button>
+                </div>
               </div>
+              <div class="code-output">{{ state.analyzeResult }}</div>
             </div>
-            <div class="code-output">{{ state.analyzeResult }}</div>
           </div>
         </div>
 
         <!-- PSD 处理 -->
-        <div class="section">
-          <h1 class="ui header">
-            <i class="wrench icon"></i>
-            <div class="content">
-              PSD 处理
-              <div class="sub header">替换智能对象并导出图片</div>
-            </div>
-          </h1>
+        <div class="view-container" :class="{ active: state.currentView === 'process' }">
+          <div class="section">
+            <h1 class="ui header">
+              <i class="wrench icon"></i>
+              <div class="content">
+                PSD 处理
+                <div class="sub header">替换智能对象并导出图片</div>
+              </div>
+            </h1>
 
-          <div class="ui segment">
-            <h3 class="ui dividing header">处理参数</h3>
-            <div class="ui small form">
-              <div class="field form-field">
-                <label>PSD 路径 *</label>
-                <input type="text" v-model="state.process.psd_path" placeholder="D:\templates\template.psd" />
-              </div>
-              <div class="field form-field">
-                <label>导出目录</label>
-                <input type="text" v-model="state.process.export_dir" placeholder="留空则使用默认 output" />
-              </div>
-              <div class="two fields">
+            <div class="ui segment">
+              <h3 class="ui dividing header">处理参数</h3>
+              <div class="ui small form">
                 <div class="field form-field">
-                  <label>导出文件名</label>
-                  <input type="text" v-model="state.process.output_filename" placeholder="可选，自动加时间戳" />
+                  <label>PSD 路径 *</label>
+                  <input type="text" v-model="state.process.psd_path" placeholder="D:\templates\template.psd" />
                 </div>
                 <div class="field form-field">
-                  <label style="opacity: 0;">占位</label>
-                  <div class="ui small checkbox">
-                    <input type="checkbox" id="process-verbose" v-model="state.process.verbose" />
-                    <label for="process-verbose">verbose</label>
+                  <label>导出目录</label>
+                  <input type="text" v-model="state.process.export_dir" placeholder="留空则使用默认 output" />
+                </div>
+                <div class="two fields">
+                  <div class="field form-field">
+                    <label>导出文件名</label>
+                    <input type="text" v-model="state.process.output_filename" placeholder="可选，自动加时间戳" />
+                  </div>
+                  <div class="field form-field">
+                    <label style="opacity: 0;">占位</label>
+                    <div class="ui small checkbox">
+                      <input type="checkbox" id="process-verbose" v-model="state.process.verbose" />
+                      <label for="process-verbose">verbose</label>
+                    </div>
                   </div>
                 </div>
-              </div>
-              
-              <!-- 智能对象配置列表 -->
-              <div class="ui dividing header" style="margin-top: 1.5rem; margin-bottom: 1rem;">
-                <span>智能对象配置</span>
-                <button type="button" class="ui tiny button" style="margin-left: 1rem;" @click="addSmartObject">
-                  <i class="plus icon"></i> 添加智能对象
-                </button>
-              </div>
-              
-              <div v-for="(so, index) in state.process.smart_objects" :key="index" class="ui segment" style="background: #f9f9f9; margin-bottom: 1rem; padding: 1rem;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
-                  <h4 style="margin: 0; font-size: 0.95em;">智能对象 #{{ index + 1 }}</h4>
-                  <button type="button" class="ui tiny red button" @click="removeSmartObject(index)" :disabled="state.process.smart_objects.length <= 1">
-                    <i class="trash icon"></i> 删除
+                
+                <!-- 智能对象配置列表 -->
+                <div class="ui dividing header" style="margin-top: 1.5rem; margin-bottom: 1rem;">
+                  <span>智能对象配置</span>
+                  <button type="button" class="ui tiny button" style="margin-left: 1rem;" @click="addSmartObject">
+                    <i class="plus icon"></i> 添加智能对象
                   </button>
                 </div>
                 
-                <div class="two fields">
-                  <div class="field form-field">
-                    <label>智能对象名称</label>
-                    <input type="text" v-model="so.smart_object_name" placeholder="可选，不指定则按顺序匹配" />
+                <div v-for="(so, index) in state.process.smart_objects" :key="index" class="ui segment" style="background: #f9f9f9; margin-bottom: 1rem; padding: 1rem;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+                    <h4 style="margin: 0; font-size: 0.95em;">智能对象 #{{ index + 1 }}</h4>
+                    <button type="button" class="ui tiny red button" @click="removeSmartObject(index)" :disabled="state.process.smart_objects.length <= 1">
+                      <i class="trash icon"></i> 删除
+                    </button>
                   </div>
-                  <div class="field form-field">
-                    <label>素材图片路径 *</label>
-                    <input type="text" v-model="so.image_path" placeholder="D:\images\image.jpg" />
+                  
+                  <div class="two fields">
+                    <div class="field form-field">
+                      <label>智能对象名称</label>
+                      <input type="text" v-model="so.smart_object_name" placeholder="可选，不指定则按顺序匹配" />
+                    </div>
+                    <div class="field form-field">
+                      <label>素材图片路径 *</label>
+                      <input type="text" v-model="so.image_path" placeholder="D:\images\image.jpg" />
+                    </div>
+                  </div>
+                  
+                  <div class="two fields">
+                    <div class="field form-field">
+                      <label>缩放模式 resize_mode</label>
+                      <select class="ui small dropdown" v-model="so.resize_mode">
+                        <option value="contain">contain (默认，等比，可能留白)</option>
+                        <option value="cover">cover (等比填充，可能裁剪)</option>
+                        <option value="stretch">stretch (拉伸变形)</option>
+                        <option value="custom">custom (自定义，需要 custom_options)</option>
+                      </select>
+                    </div>
+                    <div class="field form-field">
+                      <label>tile_size (64-2048)</label>
+                      <input type="number" v-model.number="so.tile_size" min="64" max="2048" />
+                    </div>
+                  </div>
+                  
+                  <div v-if="so.resize_mode === 'custom'" class="field form-field">
+                    <label>custom_options (JSON)</label>
+                    <textarea v-model="so.custom_options_text" placeholder='{"position": {"x": 0, "y": 0, "unit": "px"}, "size": {"width": 800, "height": 600, "unit": "px"}}' rows="4"></textarea>
                   </div>
                 </div>
                 
-                <div class="two fields">
-                  <div class="field form-field">
-                    <label>缩放模式 resize_mode</label>
-                    <select class="ui small dropdown" v-model="so.resize_mode">
-                      <option value="contain">contain (默认，等比，可能留白)</option>
-                      <option value="cover">cover (等比填充，可能裁剪)</option>
-                      <option value="stretch">stretch (拉伸变形)</option>
-                      <option value="custom">custom (自定义，需要 custom_options)</option>
-                    </select>
-                  </div>
-                  <div class="field form-field">
-                    <label>tile_size (64-2048)</label>
-                    <input type="number" v-model.number="so.tile_size" min="64" max="2048" />
-                  </div>
+                <div style="margin-top: 1rem;">
+                  <button class="ui small primary button" :class="{ loading: state.loading.process }" @click="processPsd" :disabled="state.loading.process">
+                    开始处理
+                  </button>
                 </div>
-                
-                <div v-if="so.resize_mode === 'custom'" class="field form-field">
-                  <label>custom_options (JSON)</label>
-                  <textarea v-model="so.custom_options_text" placeholder='{"position": {"x": 0, "y": 0, "unit": "px"}, "size": {"width": 800, "height": 600, "unit": "px"}}' rows="4"></textarea>
-                </div>
-              </div>
-              
-              <div style="margin-top: 1rem;">
-                <button class="ui small primary button" :class="{ loading: state.loading.process }" @click="processPsd" :disabled="state.loading.process">
-                  开始处理
-                </button>
               </div>
             </div>
-          </div>
 
-          <div v-if="state.processResult" class="ui segment" style="margin-top: 1.5rem;">
-            <h3 class="ui dividing header">处理结果</h3>
-            <div class="code-output">{{ state.processResult }}</div>
+            <div v-if="state.processResult" class="ui segment" style="margin-top: 1.5rem;">
+              <h3 class="ui dividing header">处理结果</h3>
+              <div class="code-output">{{ state.processResult }}</div>
+            </div>
           </div>
         </div>
 
@@ -427,25 +544,72 @@
       <!-- 右侧调试输出面板 -->
       <aside class="debug-panel">
         <div class="debug-panel-header">
-          <h3 class="ui header" style="margin: 0; font-size: 1em;">
-            <i class="bug icon"></i>
-            <div class="content">
-              调试输出
-              <div class="sub header" style="font-size: 0.75em;">最近一次调用的响应和错误信息</div>
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem;">
+            <h3 class="ui header" style="margin: 0; font-size: 1em;">
+              <i class="bug icon"></i>
+              <div class="content">
+                调试输出
+                <div class="sub header" style="font-size: 0.75em;">实时调试信息和日志</div>
+              </div>
+            </h3>
+            <button class="ui tiny button clear-log-btn" @click="clearDebugLog">清空</button>
+          </div>
+          <div class="debug-tabs">
+            <div 
+              v-for="tab in debugTabs" 
+              :key="tab.id"
+              class="debug-tab"
+              :class="{ active: state.currentDebugTab === tab.id }"
+              @click="state.currentDebugTab = tab.id"
+            >
+              {{ tab.name }}
+              <span v-if="tab.count > 0" style="margin-left: 0.25rem;">({{ tab.count }})</span>
             </div>
-          </h3>
+          </div>
         </div>
         <div class="debug-panel-content">
-          <div class="code-output">{{ state.lastLog }}</div>
+          <div class="debug-log">
+            <div v-if="filteredDebugLogs.length === 0" style="color: #888; text-align: center; padding: 2rem;">
+              暂无调试信息
+            </div>
+            <div 
+              v-for="(log, index) in filteredDebugLogs" 
+              :key="index"
+              class="debug-log-item"
+            >
+              <div class="debug-log-time">{{ log.time }}</div>
+              <div class="debug-log-content" :class="log.type">{{ log.content }}</div>
+            </div>
+          </div>
         </div>
       </aside>
     </div>
   </div>
 
   <!-- Semantic UI JS -->
-  <script src="https://cdn.jsdelivr.net/npm/semantic-ui@2.5.0/dist/semantic.min.js"></script>
+  <script src="https://cdn.bootcdn.net/ajax/libs/semantic-ui/2.5.0/semantic.min.js"></script>
   <script>
-    const { createApp, reactive, watch, onMounted } = Vue;
+    // 等待 Vue 加载完成的函数
+    function waitForVue(callback) {
+      if (typeof Vue !== 'undefined') {
+        callback();
+      } else {
+        // 如果 Vue 还没加载，等待一段时间后重试
+        setTimeout(function() {
+          waitForVue(callback);
+        }, 50);
+      }
+    }
+    
+    // 等待 DOM 和 Vue 都加载完成
+    function initApp() {
+      if (typeof Vue === 'undefined') {
+        console.error('Vue 未加载，请检查网络连接或 CDN 链接');
+        document.body.innerHTML = '<div style="padding: 2rem; text-align: center;"><h2>加载错误</h2><p>Vue.js 未能加载，请检查网络连接或刷新页面重试。</p></div>';
+        return;
+      }
+      
+      const { createApp, reactive, watch, onMounted, computed } = Vue;
 
     // localStorage 键名常量
     const STORAGE_KEYS = {
@@ -485,6 +649,8 @@
         const BASE_URL = 'http://localhost:1595';
         
         const state = reactive({
+          currentView: 'home', // 当前视图：home, config, analyze, process
+          currentDebugTab: 'all', // 当前调试标签：all, success, error, info
           healthOk: null,
           testConnection: false,
           startTimeout: 30,
@@ -506,7 +672,7 @@
           },
           analyzeResult: '',
           processResult: '',
-          lastLog: '等待操作...',
+          debugLogs: [], // 调试日志数组
           loading: {
             health: false,
             startPs: false,
@@ -517,6 +683,67 @@
             process: false
           }
         });
+
+        // 菜单项配置
+        const menuItems = [
+          { id: 'home', name: '首页', icon: 'home' },
+          { id: 'config', name: '服务配置', icon: 'cog' },
+          { id: 'analyze', name: 'PSD 分析', icon: 'search' },
+          { id: 'process', name: 'PSD 处理', icon: 'wrench' }
+        ];
+
+        // 调试标签配置（响应式）
+        const debugTabs = reactive([
+          { id: 'all', name: '全部', count: 0 },
+          { id: 'success', name: '成功', count: 0 },
+          { id: 'error', name: '错误', count: 0 },
+          { id: 'info', name: '信息', count: 0 }
+        ]);
+
+        // 切换视图
+        function switchView(viewId) {
+          state.currentView = viewId;
+        }
+
+        // 添加调试日志
+        function addDebugLog(content, type = 'info') {
+          const now = new Date();
+          const time = now.toLocaleTimeString('zh-CN', { hour12: false, milliseconds: true });
+          state.debugLogs.unshift({
+            time,
+            content,
+            type
+          });
+          // 限制日志数量，最多保留 200 条
+          if (state.debugLogs.length > 200) {
+            state.debugLogs = state.debugLogs.slice(0, 200);
+          }
+        }
+
+        // 清空调试日志
+        function clearDebugLog() {
+          state.debugLogs = [];
+          addDebugLog('调试日志已清空', 'info');
+        }
+
+        // 过滤调试日志
+        const filteredDebugLogs = computed(() => {
+          if (state.currentDebugTab === 'all') {
+            return state.debugLogs;
+          }
+          return state.debugLogs.filter(log => log.type === state.currentDebugTab);
+        });
+
+        // 计算各类型日志数量
+        watch(() => state.debugLogs, () => {
+          debugTabs.forEach(tab => {
+            if (tab.id === 'all') {
+              tab.count = state.debugLogs.length;
+            } else {
+              tab.count = state.debugLogs.filter(log => log.type === tab.id).length;
+            }
+          });
+        }, { immediate: true, deep: true });
 
         // 添加智能对象配置
         function addSmartObject() {
@@ -572,6 +799,7 @@
         // 页面加载时从 localStorage 读取缓存
         onMounted(() => {
           loadFromStorage();
+          addDebugLog('系统初始化完成', 'info');
         });
 
         const client = () => axios.create({
@@ -606,13 +834,14 @@
 
         async function checkHealth() {
           state.loading.health = true;
+          addDebugLog('开始健康检查...', 'info');
           try {
             const { data } = await client().get('/health');
             state.healthOk = data?.status === 'healthy';
-            state.lastLog = pretty(data);
+            addDebugLog(`健康检查成功: ${pretty(data)}`, state.healthOk ? 'success' : 'error');
           } catch (e) {
             state.healthOk = false;
-            state.lastLog = `健康检查失败:\n${pretty(e.response?.data || e.message)}`;
+            addDebugLog(`健康检查失败: ${pretty(e.response?.data || e.message)}`, 'error');
           } finally {
             state.loading.health = false;
           }
@@ -620,13 +849,15 @@
 
         async function checkPhotoshop() {
           state.loading.checkPs = true;
+          addDebugLog('开始检测 Photoshop 状态...', 'info');
           try {
             const { data } = await client().get('/photoshopStatus', {
               params: { test_connection: state.testConnection }
             });
-            state.lastLog = pretty(data);
+            const status = data.is_available ? '可用' : '不可用';
+            addDebugLog(`Photoshop 状态检测完成: ${status}\n${pretty(data)}`, data.is_available ? 'success' : 'error');
           } catch (e) {
-            state.lastLog = `Photoshop 状态检查失败:\n${pretty(e.response?.data || e.message)}`;
+            addDebugLog(`Photoshop 状态检查失败: ${pretty(e.response?.data || e.message)}`, 'error');
           } finally {
             state.loading.checkPs = false;
           }
@@ -634,14 +865,15 @@
 
         async function startPhotoshop() {
           state.loading.startPs = true;
+          addDebugLog('开始启动 Photoshop...', 'info');
           try {
             const { data } = await client().post('/startPhotoshop', null, {
               params: { timeout: state.startTimeout }
             });
-            state.lastLog = pretty(data);
+            addDebugLog(`启动 Photoshop 成功: ${pretty(data)}`, 'success');
             await checkPhotoshop();
           } catch (e) {
-            state.lastLog = `启动 Photoshop 失败:\n${pretty(e.response?.data || e.message)}`;
+            addDebugLog(`启动 Photoshop 失败: ${pretty(e.response?.data || e.message)}`, 'error');
           } finally {
             state.loading.startPs = false;
           }
@@ -652,16 +884,17 @@
             return;
           }
           state.loading.stopPs = true;
+          addDebugLog('开始关闭 Photoshop...', 'info');
           try {
             const { data } = await client().post('/stopPhotoshop', null, {
               params: { force: false }
             });
-            state.lastLog = pretty(data);
+            addDebugLog(`关闭 Photoshop 成功: ${pretty(data)}`, 'success');
             setTimeout(() => {
               checkPhotoshop();
             }, 1000);
           } catch (e) {
-            state.lastLog = `关闭 Photoshop 失败:\n${pretty(e.response?.data || e.message)}`;
+            addDebugLog(`关闭 Photoshop 失败: ${pretty(e.response?.data || e.message)}`, 'error');
           } finally {
             state.loading.stopPs = false;
           }
@@ -672,16 +905,17 @@
             return;
           }
           state.loading.restartPs = true;
+          addDebugLog('开始重启 Photoshop...', 'info');
           try {
             const { data } = await client().post('/restartPhotoshop', null, {
               params: { timeout: state.startTimeout }
             });
-            state.lastLog = pretty(data);
+            addDebugLog(`重启 Photoshop 成功: ${pretty(data)}`, 'success');
             setTimeout(() => {
               checkPhotoshop();
             }, 3000);
           } catch (e) {
-            state.lastLog = `重启 Photoshop 失败:\n${pretty(e.response?.data || e.message)}`;
+            addDebugLog(`重启 Photoshop 失败: ${pretty(e.response?.data || e.message)}`, 'error');
           } finally {
             state.loading.restartPs = false;
           }
@@ -690,17 +924,18 @@
         async function analyzePsd() {
           state.analyze.psd_path = normalizePath(state.analyze.psd_path || '');
           if (!state.analyze.psd_path) {
-            state.lastLog = '请填写 PSD 路径';
+            addDebugLog('请填写 PSD 路径', 'error');
             return;
           }
           state.loading.analyze = true;
+          addDebugLog(`开始分析 PSD: ${state.analyze.psd_path}`, 'info');
           try {
             const { data } = await client().post('/analyzePsd', { psd_path: state.analyze.psd_path });
             state.analyzeResult = pretty(data);
-            state.lastLog = '分析成功';
+            addDebugLog('PSD 分析成功', 'success');
           } catch (e) {
             state.analyzeResult = '';
-            state.lastLog = `分析失败:\n${pretty(e.response?.data || e.message)}`;
+            addDebugLog(`PSD 分析失败: ${pretty(e.response?.data || e.message)}`, 'error');
           } finally {
             state.loading.analyze = false;
           }
@@ -728,9 +963,9 @@
         async function copyAnalyzeResultRaw() {
           try {
             await copyToClipboard(state.analyzeResult);
-            state.lastLog = '分析结果已复制（JSON 原样）';
+            addDebugLog('分析结果已复制（JSON 原样）', 'success');
           } catch (e) {
-            state.lastLog = `复制失败: ${e.message || e}`;
+            addDebugLog(`复制失败: ${e.message || e}`, 'error');
           }
         }
 
@@ -743,9 +978,9 @@
             // 包裹括号，便于直接在控制台粘贴作为表达式
             const wrapped = (raw.startsWith('{') || raw.startsWith('[')) ? `(${raw})` : raw;
             await copyToClipboard(wrapped);
-            state.lastLog = '分析结果已复制（控制台可直接粘贴执行）';
+            addDebugLog('分析结果已复制（控制台可直接粘贴执行）', 'success');
           } catch (e) {
-            state.lastLog = `复制失败: ${e.message || e}`;
+            addDebugLog(`复制失败: ${e.message || e}`, 'error');
           }
         }
 
@@ -753,7 +988,7 @@
           // 验证和规范化 PSD 路径
           state.process.psd_path = normalizePath(state.process.psd_path || '');
           if (!state.process.psd_path) {
-            state.lastLog = '请填写 PSD 路径';
+            addDebugLog('请填写 PSD 路径', 'error');
             return;
           }
 
@@ -763,7 +998,7 @@
             const so = state.process.smart_objects[i];
             const imagePath = normalizePath(so.image_path || '');
             if (!imagePath) {
-              state.lastLog = `智能对象 #${i + 1} 的素材图片路径不能为空`;
+              addDebugLog(`智能对象 #${i + 1} 的素材图片路径不能为空`, 'error');
               return;
             }
 
@@ -784,11 +1019,11 @@
                 try {
                   soConfig.custom_options = JSON.parse(so.custom_options_text);
                 } catch (err) {
-                  state.lastLog = `智能对象 #${i + 1} 的 custom_options 不是有效的 JSON: ${err.message}`;
+                  addDebugLog(`智能对象 #${i + 1} 的 custom_options 不是有效的 JSON: ${err.message}`, 'error');
                   return;
                 }
               } else {
-                state.lastLog = `智能对象 #${i + 1} 使用 custom 模式，必须提供 custom_options`;
+                addDebugLog(`智能对象 #${i + 1} 使用 custom 模式，必须提供 custom_options`, 'error');
                 return;
               }
             }
@@ -797,7 +1032,7 @@
           }
 
           if (smartObjects.length === 0) {
-            state.lastLog = '至少需要配置一个智能对象';
+            addDebugLog('至少需要配置一个智能对象', 'error');
             return;
           }
 
@@ -820,13 +1055,14 @@
           }
 
           state.loading.process = true;
+          addDebugLog(`开始处理 PSD: ${state.process.psd_path}\n配置了 ${smartObjects.length} 个智能对象`, 'info');
           try {
             const { data } = await client().post('/processPsd', payload);
             state.processResult = pretty(data);
-            state.lastLog = '处理成功';
+            addDebugLog('PSD 处理成功', 'success');
           } catch (e) {
             state.processResult = '';
-            state.lastLog = `处理失败:\n${pretty(e.response?.data || e.message)}`;
+            addDebugLog(`PSD 处理失败: ${pretty(e.response?.data || e.message)}`, 'error');
           } finally {
             state.loading.process = false;
           }
@@ -834,6 +1070,10 @@
 
         return {
           state,
+          menuItems,
+          debugTabs,
+          filteredDebugLogs,
+          switchView,
           checkHealth,
           checkPhotoshop,
           analyzePsd,
@@ -844,10 +1084,22 @@
           copyAnalyzeResultRaw,
           copyAnalyzeResultEval,
           addSmartObject,
-          removeSmartObject
+          removeSmartObject,
+          clearDebugLog
         };
       }
     }).mount('#app');
+    }
+    
+    // 等待 Vue 加载完成后初始化应用
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', function() {
+        waitForVue(initApp);
+      });
+    } else {
+      // DOM 已经加载完成
+      waitForVue(initApp);
+    }
   </script>
 </body>
 </html>
