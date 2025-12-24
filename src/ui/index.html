@@ -236,11 +236,7 @@
           <div class="ui segment">
             <h3 class="ui dividing header">API 配置</h3>
             <div class="ui small form">
-              <div class="three fields">
-                <div class="field form-field">
-                  <label>API 基础地址</label>
-                  <input type="text" v-model="state.baseUrl" placeholder="例如 http://localhost:1595" />
-                </div>
+              <div class="two fields">
                 <div class="field form-field">
                   <label>Photoshop 启动超时（秒）</label>
                   <input type="number" min="5" max="120" v-model.number="state.startTimeout" />
@@ -341,45 +337,18 @@
           <div class="ui segment">
             <h3 class="ui dividing header">处理参数</h3>
             <div class="ui small form">
-              <div class="two fields">
-                <div class="field form-field">
-                  <label>PSD 路径 *</label>
-                  <input type="text" v-model="state.process.psd_path" placeholder="D:\templates\template.psd" />
-                </div>
-                <div class="field form-field">
-                  <label>素材图片路径 *</label>
-                  <input type="text" v-model="state.process.image_path" placeholder="D:\images\image.jpg" />
-                </div>
+              <div class="field form-field">
+                <label>PSD 路径 *</label>
+                <input type="text" v-model="state.process.psd_path" placeholder="D:\templates\template.psd" />
               </div>
-              <div class="two fields">
-                <div class="field form-field">
-                  <label>导出目录</label>
-                  <input type="text" v-model="state.process.export_dir" placeholder="留空则使用默认 output" />
-                </div>
-                <div class="field form-field">
-                  <label>智能对象名称</label>
-                  <input type="text" v-model="state.process.smart_object_name" placeholder="可选，默认第一个智能对象" />
-                </div>
+              <div class="field form-field">
+                <label>导出目录</label>
+                <input type="text" v-model="state.process.export_dir" placeholder="留空则使用默认 output" />
               </div>
               <div class="two fields">
                 <div class="field form-field">
                   <label>导出文件名</label>
                   <input type="text" v-model="state.process.output_filename" placeholder="可选，自动加时间戳" />
-                </div>
-                <div class="field form-field">
-                  <label>tile_size (64-2048)</label>
-                  <input type="number" v-model.number="state.process.tile_size" min="64" max="2048" />
-                </div>
-              </div>
-              <div class="two fields">
-                <div class="field form-field">
-                  <label>缩放模式 resize_mode</label>
-                  <select class="ui small dropdown" v-model="state.process.resize_mode">
-                    <option value="contain">contain (默认，等比，可能留白)</option>
-                    <option value="cover">cover (等比填充，可能裁剪)</option>
-                    <option value="stretch">stretch (拉伸变形)</option>
-                    <option value="custom">custom (自定义，需要 custom_options)</option>
-                  </select>
                 </div>
                 <div class="field form-field">
                   <label style="opacity: 0;">占位</label>
@@ -389,10 +358,56 @@
                   </div>
                 </div>
               </div>
-              <div v-if="state.process.resize_mode === 'custom'" class="field form-field">
-                <label>custom_options (JSON)</label>
-                <textarea v-model="state.customOptionsText" placeholder='{"position": {...}, "size": {...}}' rows="6"></textarea>
+              
+              <!-- 智能对象配置列表 -->
+              <div class="ui dividing header" style="margin-top: 1.5rem; margin-bottom: 1rem;">
+                <span>智能对象配置</span>
+                <button type="button" class="ui tiny button" style="margin-left: 1rem;" @click="addSmartObject">
+                  <i class="plus icon"></i> 添加智能对象
+                </button>
               </div>
+              
+              <div v-for="(so, index) in state.process.smart_objects" :key="index" class="ui segment" style="background: #f9f9f9; margin-bottom: 1rem; padding: 1rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+                  <h4 style="margin: 0; font-size: 0.95em;">智能对象 #{{ index + 1 }}</h4>
+                  <button type="button" class="ui tiny red button" @click="removeSmartObject(index)" :disabled="state.process.smart_objects.length <= 1">
+                    <i class="trash icon"></i> 删除
+                  </button>
+                </div>
+                
+                <div class="two fields">
+                  <div class="field form-field">
+                    <label>智能对象名称</label>
+                    <input type="text" v-model="so.smart_object_name" placeholder="可选，不指定则按顺序匹配" />
+                  </div>
+                  <div class="field form-field">
+                    <label>素材图片路径 *</label>
+                    <input type="text" v-model="so.image_path" placeholder="D:\images\image.jpg" />
+                  </div>
+                </div>
+                
+                <div class="two fields">
+                  <div class="field form-field">
+                    <label>缩放模式 resize_mode</label>
+                    <select class="ui small dropdown" v-model="so.resize_mode">
+                      <option value="contain">contain (默认，等比，可能留白)</option>
+                      <option value="cover">cover (等比填充，可能裁剪)</option>
+                      <option value="stretch">stretch (拉伸变形)</option>
+                      <option value="custom">custom (自定义，需要 custom_options)</option>
+                    </select>
+                  </div>
+                  <div class="field form-field">
+                    <label>tile_size (64-2048)</label>
+                    <input type="number" v-model.number="so.tile_size" min="64" max="2048" />
+                  </div>
+                </div>
+                
+                <div v-if="so.resize_mode === 'custom'" class="field form-field">
+                  <label>custom_options (JSON)</label>
+                  <textarea v-model="so.custom_options_text" placeholder='{"position": {"x": 0, "y": 0, "unit": "px"}, "size": {"width": 800, "height": 600, "unit": "px"}}' rows="4"></textarea>
+                </div>
+              </div>
+              
               <div style="margin-top: 1rem;">
                 <button class="ui small primary button" :class="{ loading: state.loading.process }" @click="processPsd" :disabled="state.loading.process">
                   开始处理
@@ -430,27 +445,65 @@
   <!-- Semantic UI JS -->
   <script src="https://cdn.jsdelivr.net/npm/semantic-ui@2.5.0/dist/semantic.min.js"></script>
   <script>
-    const { createApp, reactive } = Vue;
+    const { createApp, reactive, watch, onMounted } = Vue;
+
+    // localStorage 键名常量
+    const STORAGE_KEYS = {
+      PSD_PATH: 'yishe_ps_psd_path',
+      ANALYZE_PSD_PATH: 'yishe_ps_analyze_psd_path',
+      IMAGE_PATH: 'yishe_ps_image_path',
+      EXPORT_DIR: 'yishe_ps_export_dir'
+    };
+
+    // localStorage 工具函数
+    const storage = {
+      get(key) {
+        try {
+          const value = localStorage.getItem(key);
+          return value ? value : '';
+        } catch (e) {
+          console.warn('读取 localStorage 失败:', e);
+          return '';
+        }
+      },
+      set(key, value) {
+        try {
+          if (value && value.trim()) {
+            localStorage.setItem(key, value);
+          } else {
+            localStorage.removeItem(key);
+          }
+        } catch (e) {
+          console.warn('保存 localStorage 失败:', e);
+        }
+      }
+    };
 
     createApp({
       setup() {
+        // API 基础地址固定为默认值，不需要配置
+        const BASE_URL = 'http://localhost:1595';
+        
         const state = reactive({
-          baseUrl: 'http://localhost:1595',
           healthOk: null,
           testConnection: false,
           startTimeout: 30,
           analyze: { psd_path: '' },
           process: {
             psd_path: '',
-            image_path: '',
             export_dir: '',
-            smart_object_name: '',
             output_filename: '',
-            tile_size: 512,
-            resize_mode: 'cover',
-            verbose: true
+            verbose: true,
+            smart_objects: [
+              {
+                smart_object_name: '',
+                image_path: '',
+                resize_mode: 'contain',
+                tile_size: 512,
+                custom_options_text: ''
+              }
+            ]
           },
-          customOptionsText: '',
           analyzeResult: '',
           processResult: '',
           lastLog: '等待操作...',
@@ -465,8 +518,64 @@
           }
         });
 
+        // 添加智能对象配置
+        function addSmartObject() {
+          state.process.smart_objects.push({
+            smart_object_name: '',
+            image_path: '',
+            resize_mode: 'contain',
+            tile_size: 512,
+            custom_options_text: ''
+          });
+        }
+
+        // 删除智能对象配置
+        function removeSmartObject(index) {
+          if (state.process.smart_objects.length > 1) {
+            state.process.smart_objects.splice(index, 1);
+          }
+        }
+
+        // 从 localStorage 加载缓存的值
+        function loadFromStorage() {
+          state.process.psd_path = storage.get(STORAGE_KEYS.PSD_PATH);
+          state.analyze.psd_path = storage.get(STORAGE_KEYS.ANALYZE_PSD_PATH) || state.process.psd_path;
+          state.process.export_dir = storage.get(STORAGE_KEYS.EXPORT_DIR);
+          
+          // 加载第一个智能对象的图片路径（向后兼容）
+          const cachedImagePath = storage.get(STORAGE_KEYS.IMAGE_PATH);
+          if (cachedImagePath && state.process.smart_objects.length > 0) {
+            state.process.smart_objects[0].image_path = cachedImagePath;
+          }
+        }
+
+        // 监听输入框变化并保存到 localStorage
+        watch(() => state.process.psd_path, (newVal) => {
+          storage.set(STORAGE_KEYS.PSD_PATH, newVal);
+        });
+
+        watch(() => state.analyze.psd_path, (newVal) => {
+          storage.set(STORAGE_KEYS.ANALYZE_PSD_PATH, newVal);
+        });
+
+        // 监听第一个智能对象的图片路径（向后兼容）
+        watch(() => state.process.smart_objects[0]?.image_path, (newVal) => {
+          if (newVal) {
+            storage.set(STORAGE_KEYS.IMAGE_PATH, newVal);
+          }
+        });
+
+        watch(() => state.process.export_dir, (newVal) => {
+          storage.set(STORAGE_KEYS.EXPORT_DIR, newVal);
+        });
+
+        // 页面加载时从 localStorage 读取缓存
+        onMounted(() => {
+          loadFromStorage();
+        });
+
         const client = () => axios.create({
-          baseURL: state.baseUrl,
+          baseURL: BASE_URL,
           timeout: 0
         });
 
@@ -641,29 +750,75 @@
         }
 
         async function processPsd() {
+          // 验证和规范化 PSD 路径
           state.process.psd_path = normalizePath(state.process.psd_path || '');
-          state.process.image_path = normalizePath(state.process.image_path || '');
-          state.process.export_dir = normalizePath(state.process.export_dir || '');
-          state.process.smart_object_name = stripQuotes(state.process.smart_object_name || '');
-          state.process.output_filename = stripQuotes(state.process.output_filename || '');
-          if (!state.process.psd_path || !state.process.image_path) {
-            state.lastLog = '请填写 PSD 路径和素材图片路径';
+          if (!state.process.psd_path) {
+            state.lastLog = '请填写 PSD 路径';
             return;
           }
-          const payload = { ...state.process };
-          if (!payload.export_dir) delete payload.export_dir;
-          if (!payload.smart_object_name) delete payload.smart_object_name;
-          if (!payload.output_filename) delete payload.output_filename;
-          if (payload.resize_mode !== 'custom') {
-            delete payload.custom_options;
-          } else if (state.customOptionsText.trim()) {
-            try {
-              payload.custom_options = JSON.parse(state.customOptionsText);
-            } catch (err) {
-              state.lastLog = 'custom_options 不是有效的 JSON';
+
+          // 验证和规范化智能对象配置
+          const smartObjects = [];
+          for (let i = 0; i < state.process.smart_objects.length; i++) {
+            const so = state.process.smart_objects[i];
+            const imagePath = normalizePath(so.image_path || '');
+            if (!imagePath) {
+              state.lastLog = `智能对象 #${i + 1} 的素材图片路径不能为空`;
               return;
             }
+
+            const soConfig = {
+              image_path: imagePath,
+              resize_mode: so.resize_mode || 'contain',
+              tile_size: so.tile_size || 512
+            };
+
+            // 添加智能对象名称（如果提供）
+            if (so.smart_object_name && so.smart_object_name.trim()) {
+              soConfig.smart_object_name = stripQuotes(so.smart_object_name.trim());
+            }
+
+            // 处理 custom_options
+            if (soConfig.resize_mode === 'custom') {
+              if (so.custom_options_text && so.custom_options_text.trim()) {
+                try {
+                  soConfig.custom_options = JSON.parse(so.custom_options_text);
+                } catch (err) {
+                  state.lastLog = `智能对象 #${i + 1} 的 custom_options 不是有效的 JSON: ${err.message}`;
+                  return;
+                }
+              } else {
+                state.lastLog = `智能对象 #${i + 1} 使用 custom 模式，必须提供 custom_options`;
+                return;
+              }
+            }
+
+            smartObjects.push(soConfig);
           }
+
+          if (smartObjects.length === 0) {
+            state.lastLog = '至少需要配置一个智能对象';
+            return;
+          }
+
+          // 构建请求 payload
+          const payload = {
+            psd_path: state.process.psd_path,
+            smart_objects: smartObjects,
+            verbose: state.process.verbose
+          };
+
+          // 添加可选字段
+          const exportDir = normalizePath(state.process.export_dir || '');
+          if (exportDir) {
+            payload.export_dir = exportDir;
+          }
+
+          const outputFilename = stripQuotes(state.process.output_filename || '');
+          if (outputFilename) {
+            payload.output_filename = outputFilename;
+          }
+
           state.loading.process = true;
           try {
             const { data } = await client().post('/processPsd', payload);
@@ -687,7 +842,9 @@
           stopPhotoshop,
           restartPhotoshop,
           copyAnalyzeResultRaw,
-          copyAnalyzeResultEval
+          copyAnalyzeResultEval,
+          addSmartObject,
+          removeSmartObject
         };
       }
     }).mount('#app');
