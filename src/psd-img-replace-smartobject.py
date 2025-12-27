@@ -953,6 +953,71 @@ def replace_smart_object_content(
     resized_img.close()
     gc.collect()
     
+    # 辅助函数：安全删除图层（直接尝试删除，失败就跳过，避免弹窗）
+    def safe_delete_layer(layer, layer_index, use_index=True):
+        """安全删除图层，如果失败返回False，不会弹窗"""
+        try:
+            if use_index:
+                # 使用 ActionDescriptor 通过索引删除
+                delete_id = string_id("delete")
+                layer_ref = ActionReference()
+                layer_ref.putIndex(string_id("layer"), layer_index)
+                
+                delete_desc = ActionDescriptor()
+                delete_desc.putReference(string_id("null"), layer_ref)
+                
+                # 使用 DisplayNoDialogs 避免弹窗
+                session.app.executeAction(delete_id, delete_desc, DialogModes.DisplayNoDialogs)
+            else:
+                # 尝试直接调用 delete 方法
+                if hasattr(layer, 'delete'):
+                    layer.delete()
+                else:
+                    return False
+            return True
+        except:
+            # 删除失败，返回False，不抛出异常
+            return False
+    
+    # 在放置新图片之前，尝试清理旧图层（但不强制，失败就跳过）
+    print(f"    正在清理智能对象文档中的旧图层...")
+    try:
+        current_doc = session.active_document
+        if hasattr(current_doc, 'layers') and len(current_doc.layers) > 0:
+            layer_count = len(current_doc.layers)
+            print(f"    发现 {layer_count} 个旧图层，尝试清理...")
+            
+            # 从后往前尝试删除，失败就跳过
+            deleted = 0
+            for i in range(layer_count - 1, -1, -1):
+                try:
+                    layer = current_doc.layers[i]
+                    layer_name = layer.name if hasattr(layer, 'name') else f"图层{i+1}"
+                    
+                    # 尝试删除（使用索引方式，更安全）
+                    if safe_delete_layer(layer, i + 1, use_index=True):
+                        deleted += 1
+                        print(f"      已删除: {layer_name}")
+                        import time
+                        time.sleep(0.1)
+                        # 重新获取文档
+                        current_doc = session.active_document
+                    else:
+                        # 删除失败，跳过这个图层
+                        print(f"      跳过: {layer_name} (无法删除)")
+                        break  # 如果删除失败，可能后面的也删不了，退出
+                except:
+                    break
+            
+            if deleted > 0:
+                print(f"    ✅ 清理完成（删除了 {deleted} 个图层）")
+            else:
+                print(f"    ℹ️  未删除任何图层（可能都是不可删除的图层）")
+        else:
+            print(f"    ℹ️  没有旧图层需要清理")
+    except Exception as e:
+        print(f"    ⚠️ 警告: 清理旧图层时出错: {e}，继续执行")
+    
     # 放置新图片
     print(f"    正在放置新图片: {resized_path.name}")
     
@@ -1004,6 +1069,75 @@ def replace_smart_object_content(
         try:
             smart_doc = session.active_document
             print(f"    ✅ 已更新智能对象文档引用")
+            
+            # 在放置新图片后，再次清理旧图层（只保留最新放置的图层）
+            print(f"    正在清理放置后的旧图层...")
+            import time
+            time.sleep(0.5)  # 等待放置操作完全完成
+            
+            # 重新获取最新的文档引用
+            post_place_doc = session.active_document
+            
+            # 获取当前所有图层
+            if hasattr(post_place_doc, 'layers') and len(post_place_doc.layers) > 1:
+                # 如果有多个图层，保留最后一个（最新放置的），删除其他的
+                total_layers = len(post_place_doc.layers)
+                print(f"    发现 {total_layers} 个图层，保留最新的，删除其他旧图层...")
+                
+                deleted_count = 0
+                # 从倒数第二个开始删除（保留最后一个）
+                # 使用循环删除，直到只剩一个图层或无法删除
+                while True:
+                    try:
+                        # 重新获取文档和图层数量
+                        current_doc = session.active_document
+                        if not hasattr(current_doc, 'layers') or len(current_doc.layers) <= 1:
+                            break
+                        
+                        current_layer_count = len(current_doc.layers)
+                        if current_layer_count <= 1:
+                            break
+                        
+                        # 删除倒数第二个图层（保留最后一个）
+                        layer_to_delete_index = current_layer_count - 2  # 倒数第二个（从0开始）
+                        layer = current_doc.layers[layer_to_delete_index]
+                        layer_name = layer.name if hasattr(layer, 'name') else f"图层{layer_to_delete_index+1}"
+                        
+                        # 尝试安全删除（失败就退出，避免弹窗）
+                        if safe_delete_layer(layer, layer_to_delete_index + 1, use_index=True):
+                            deleted_count += 1
+                            print(f"      已删除旧图层: {layer_name}")
+                            time.sleep(0.15)  # 等待删除操作完成
+                        else:
+                            # 删除失败，可能是不允许删除的图层，退出循环
+                            print(f"      跳过不可删除的图层: {layer_name}，停止清理")
+                            break
+                            
+                    except Exception as e:
+                        error_msg = str(e)
+                        # 如果是因为图层不存在或索引错误，说明已经删完了
+                        if "不存在" in error_msg or "not found" in error_msg.lower() or "index" in error_msg.lower() or "out of range" in error_msg.lower():
+                            break
+                        print(f"      ⚠️ 警告: 清理旧图层时出错: {e}，停止清理")
+                        break
+                
+                # 最终验证
+                time.sleep(0.2)
+                final_smart_doc = session.active_document
+                final_count = len(final_smart_doc.layers) if hasattr(final_smart_doc, 'layers') else 0
+                if final_count == 1:
+                    print(f"    ✅ 清理完成，只保留最新图层（删除了 {deleted_count} 个旧图层）")
+                elif final_count == 0:
+                    print(f"    ⚠️ 警告: 清理后没有图层了，这不应该发生")
+                else:
+                    print(f"    ℹ️  清理后仍有 {final_count} 个图层（可能包含不可删除的图层）")
+            else:
+                layer_count = len(post_place_doc.layers) if hasattr(post_place_doc, 'layers') else 0
+                if layer_count == 1:
+                    print(f"    ✅ 图层数量正常（只有1个图层），无需清理")
+                else:
+                    print(f"    ℹ️  图层数量: {layer_count}")
+                
         except Exception as e:
             print(f"    ⚠️ 警告: 更新文档引用时出错: {e}")
             
