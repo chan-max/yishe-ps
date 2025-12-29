@@ -990,60 +990,6 @@ def replace_smart_object_content(
             # 删除失败，返回False，不抛出异常
             return False
     
-    # 在放置新图片之前，先删除智能对象文档中的所有旧图层
-    # ⚠️ 重要：placeEvent 是"放置"操作，会在现有图层上添加新图层，而不是替换
-    # 因此必须在放置前删除旧图层，才能实现真正的替换效果
-    print(f"    正在清理智能对象文档中的旧图层（放置前清理，确保替换而非添加）...")
-    try:
-        current_doc = session.active_document
-        if hasattr(current_doc, 'layers') and len(current_doc.layers) > 0:
-            layer_count = len(current_doc.layers)
-            print(f"    发现 {layer_count} 个旧图层，开始清理...")
-            
-            # 从后往前删除所有图层（因为新图层还没放置，所以可以安全删除所有旧图层）
-            deleted = 0
-            for i in range(layer_count - 1, -1, -1):
-                try:
-                    layer = current_doc.layers[i]
-                    layer_name = layer.name if hasattr(layer, 'name') else f"图层{i+1}"
-                    
-                    # 尝试删除（使用索引方式，更安全）
-                    if safe_delete_layer(layer, i + 1, use_index=True):
-                        deleted += 1
-                        print(f"      已删除: {layer_name}")
-                        import time
-                        time.sleep(0.1)
-                        # 重新获取文档
-                        current_doc = session.active_document
-                    else:
-                        # 删除失败，跳过这个图层
-                        print(f"      跳过: {layer_name} (无法删除，可能是锁定图层)")
-                        # 继续尝试删除其他图层
-                        continue
-                except Exception as e:
-                    print(f"      删除图层时出错: {e}，继续处理下一个")
-                    continue
-            
-            if deleted > 0:
-                print(f"    ✅ 清理完成（删除了 {deleted} 个旧图层）")
-            else:
-                print(f"    ⚠️ 警告: 未能删除任何旧图层（可能都是锁定或不可删除的图层）")
-                
-            # 验证清理结果
-            try:
-                final_doc = session.active_document
-                remaining_count = len(final_doc.layers) if hasattr(final_doc, 'layers') else 0
-                if remaining_count > 0:
-                    print(f"    ⚠️ 警告: 清理后仍有 {remaining_count} 个图层未删除")
-                else:
-                    print(f"    ✅ 验证: 所有旧图层已清理，可以安全放置新图片")
-            except:
-                pass
-        else:
-            print(f"    ℹ️  没有旧图层需要清理（智能对象文档为空）")
-    except Exception as e:
-        print(f"    ⚠️ 警告: 清理旧图层时出错: {e}，继续执行放置操作")
-    
     # 放置新图片
     print(f"    正在放置新图片: {resized_path.name}")
     
@@ -1095,7 +1041,6 @@ def replace_smart_object_content(
         try:
             smart_doc = session.active_document
             print(f"    ✅ 已更新智能对象文档引用")
-            print(f"    ℹ️  跳过清理图层步骤，保留所有图层（包括新放置的图层）")
         except Exception as e:
             print(f"    ⚠️ 警告: 更新文档引用时出错: {e}")
             
