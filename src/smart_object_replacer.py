@@ -9,7 +9,7 @@ from typing import Optional
 
 from photoshop import Session
 from photoshop.api import ActionDescriptor, ActionReference
-from photoshop.api.enumerations import DialogModes
+from photoshop.api.enumerations import DialogModes, LayerKind
 
 # 支持相对导入和绝对导入
 try:
@@ -159,28 +159,99 @@ def replace_smart_object_content(
     if not resized_path.exists():
         raise FileNotFoundError(f"缩放后的图片文件不存在: {resized_path}")
     
-    # 检查智能对象文档中是否有图层，如果有多个图层，需要先选择所有图层并替换
-    # 注意：不再删除图层，只进行替换操作
+    # 检查智能对象文档中是否有图层，处理旧图层
+    # 策略：优先使用 placeEvent 替换第一个图层内容，然后删除多余的图层
     try:
         if hasattr(smart_doc, 'layers') and len(smart_doc.layers) > 0:
-            print(f"    智能对象文档当前有 {len(smart_doc.layers)} 个图层")
-            # 选择第一个图层（通常是背景或主要图层）
-            if len(smart_doc.layers) > 0:
-                smart_doc.activeLayer = smart_doc.layers[0]
-                print(f"    已选择第一个图层进行替换")
+            layer_count = len(smart_doc.layers)
+            print(f"    智能对象文档当前有 {layer_count} 个图层")
+            
+            # 选择第一个图层，placeEvent 会替换它的内容
+            first_layer = smart_doc.layers[0]
+            smart_doc.activeLayer = first_layer
+            print(f"    ✅ 已选择第一个图层，placeEvent 将替换其内容")
+            
+            # 如果有多个图层，尝试删除多余的图层（从后往前删除）
+            if layer_count > 1:
+                print(f"    📋 检测到 {layer_count} 个图层，将尝试删除多余的图层")
+                
+                # 辅助函数：检查图层是否可以删除
+                def can_delete_layer(layer):
+                    """检查图层是否可以删除"""
+                    try:
+                        # 检查是否是背景图层
+                        if hasattr(layer, 'kind'):
+                            # kind 为 LayerKind.BackgroundLayer 表示背景图层
+                            if layer.kind == LayerKind.BackgroundLayer:
+                                return False, "背景图层"
+                        # 检查是否被锁定
+                        if hasattr(layer, 'allLocked') and layer.allLocked:
+                            return False, "图层被锁定"
+                        return True, "可删除"
+                    except Exception as e:
+                        # 如果检查失败，默认允许尝试删除（让删除操作自己判断）
+                        return True, f"检查失败({str(e)[:50]})，尝试删除"
+                
+                # 从后往前删除多余的图层（保留第一个）
+                deleted_count = 0
+                for i in range(layer_count - 1, 0, -1):  # 从最后一个到第二个
+                    try:
+                        layer = smart_doc.layers[i]
+                        can_delete, reason = can_delete_layer(layer)
+                        
+                        if not can_delete:
+                            print(f"    ⚠️ 跳过图层 {i+1}: {reason}，无法删除")
+                            continue
+                        
+                        # 尝试删除
+                        try:
+                            # 方法1: 使用 ActionDescriptor
+                            delete_id = string_id("delete")
+                            layer_ref = ActionReference()
+                            layer_ref.putIndex(string_id("layer"), i + 1)  # PS索引从1开始
+                            
+                            delete_desc = ActionDescriptor()
+                            delete_desc.putReference(string_id("null"), layer_ref)
+                            
+                            session.app.executeAction(delete_id, delete_desc, DialogModes.DisplayNoDialogs)
+                            deleted_count += 1
+                            print(f"    ✅ 已删除图层 {i+1}/{layer_count}")
+                        except Exception as e1:
+                            # 方法2: 直接调用 delete 方法
+                            try:
+                                if hasattr(layer, 'delete'):
+                                    layer.delete()
+                                    deleted_count += 1
+                                    print(f"    ✅ 使用备用方法删除图层 {i+1}")
+                                else:
+                                    print(f"    ⚠️ 图层 {i+1} 无法删除: 没有 delete 方法")
+                            except Exception as e2:
+                                print(f"    ⚠️ 图层 {i+1} 无法删除: {e2}")
+                        
+                        # 等待一下，让PS完成删除操作
+                        time.sleep(0.2)
+                        
+                    except Exception as e:
+                        print(f"    ⚠️ 警告: 处理图层 {i+1} 时出错: {e}")
+                        continue
+                
+                print(f"    ✅ 已删除 {deleted_count}/{layer_count-1} 个多余图层")
+            else:
+                print(f"    ✅ 只有一个图层，将直接替换其内容")
     except Exception as e:
-        print(f"    ⚠️ 警告: 检查图层时出错: {e}，继续执行替换")
+        print(f"    ⚠️ 警告: 处理图层时出错: {e}，继续执行替换")
     
-    # 方法1: 使用 placeEvent 放置图片（替换整个智能对象内容）
-    # 注意：placeEvent 会替换当前选中的图层或整个智能对象内容，不会删除图层
+    # 方法1: 使用 placeEvent 放置图片（替换选中图层的内容）
+    # 注意：如果选中了图层，placeEvent 会替换该图层的内容，而不是创建新图层
+    # 如果第一个图层是背景图层，placeEvent 会创建新图层
     place_desc = ActionDescriptor()
     place_desc.putPath(string_id("null"), str(resized_path))
     place_desc.putBoolean(string_id("antiAlias"), True)
     
     try:
-        # 执行放置操作（这会替换智能对象的内容，而不是添加新图层）
+        # 执行放置操作（会替换选中图层的内容，或创建新图层）
         session.app.executeAction(string_id("placeEvent"), place_desc, DialogModes.DisplayNoDialogs)
-        print(f"    ✅ 图片已放置（替换模式，不删除旧图层）")
+        print(f"    ✅ 图片已放置（替换选中图层内容）")
         
         # 等待一下，让 PS 完成放置操作
         time.sleep(0.8)  # 增加等待时间，确保PS完成处理
