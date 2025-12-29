@@ -900,12 +900,23 @@ def replace_smart_object_content(
     # 准备缩放后的图片
     from PIL import Image
     with Image.open(image_path) as img:
-        # 根据缩放模式决定是否需要保留透明通道
-        # contain 和 custom 模式需要透明背景，所以保留透明通道
-        # stretch 和 cover 模式可以转换为 RGB
-        if resize_mode not in ("contain", "custom"):
-            if img.mode in ("RGBA", "LA", "P"):
-                img = img.convert("RGB")
+        # 保留透明通道：RGBA、LA 模式保持原样，P 模式如果有透明通道则转换为 RGBA
+        # 只有不包含透明通道的图片才转换为 RGB
+        if img.mode == "P":
+            # 调色板模式：检查是否有透明通道
+            if "transparency" in img.info:
+                img = img.convert("RGBA")
+            else:
+                # 如果没有透明通道，根据模式决定是否转换为 RGB
+                if resize_mode not in ("contain", "custom"):
+                    img = img.convert("RGB")
+        elif img.mode == "LA":
+            # LA 模式（灰度+透明）：转换为 RGBA 以保持透明通道
+            img = img.convert("RGBA")
+        elif img.mode == "RGBA":
+            # RGBA 模式保持不变，直接使用（所有模式都保留透明通道）
+            pass
+        # RGB 等其他模式保持不变
         
         # 显示原始图片尺寸和比例信息
         orig_width, orig_height = img.size
@@ -938,9 +949,9 @@ def replace_smart_object_content(
             custom_options=custom_options
         )
         
-        # contain 和 custom 模式使用透明背景（RGBA），需要保存为 PNG 格式以保留透明通道
+        # 如果图片有透明通道（RGBA 模式），保存为 PNG 格式以保留透明通道
         # 其他模式可以保持原始格式
-        if resize_mode in ("contain", "custom") and resized_img.mode == "RGBA":
+        if resized_img.mode == "RGBA":
             resized_path = export_dir / f"{image_path.stem}_resized.png"
         else:
             resized_path = export_dir / f"{image_path.stem}_resized{image_path.suffix}"

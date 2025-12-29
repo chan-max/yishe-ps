@@ -50,7 +50,13 @@ def resize_image_in_tiles(
         scale_x = target_width / orig_width
         scale_y = target_height / orig_height
         
-        resized_img = Image.new(img.mode, (target_width, target_height))
+        # 如果原图是 RGBA 模式，创建 RGBA 画布以保留透明通道
+        # 否则使用原图模式
+        if img.mode == "RGBA":
+            resized_img = Image.new("RGBA", (target_width, target_height), (0, 0, 0, 0))
+        else:
+            resized_img = Image.new(img.mode, (target_width, target_height))
+        
         for top in range(0, orig_height, tile_size):
             bottom = min(top + tile_size, orig_height)
             for left in range(0, orig_width, tile_size):
@@ -64,7 +70,12 @@ def resize_image_in_tiles(
                 out_bottom = int(bottom * scale_y)
 
                 tile_resized = tile.resize((out_right - out_left, out_bottom - out_top), Image.LANCZOS)
-                resized_img.paste(tile_resized, (out_left, out_top))
+                
+                # 如果图片是 RGBA 模式，使用 alpha 通道作为遮罩以保留透明效果
+                if tile_resized.mode == "RGBA":
+                    resized_img.paste(tile_resized, (out_left, out_top), tile_resized)
+                else:
+                    resized_img.paste(tile_resized, (out_left, out_top))
 
                 tile.close()
                 del tile_resized

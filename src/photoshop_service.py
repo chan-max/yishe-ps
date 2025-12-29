@@ -28,13 +28,29 @@ def pick_layer(doc, artboard_name: Optional[str]):
 def _prepare_resized_image(png_path: Path, smart_doc, export_dir: Path, tile_size: int) -> Path:
     """准备缩放后的图片文件。"""
     with Image.open(png_path) as img:
-        if img.mode in ("RGBA", "LA", "P"):
-            img = img.convert("RGB")
+        # 保留透明通道：RGBA、LA 模式保持原样，P 模式如果有透明通道则转换为 RGBA
+        # 只有不包含透明通道的图片才转换为 RGB
+        if img.mode == "P":
+            # 调色板模式：检查是否有透明通道
+            if "transparency" in img.info:
+                img = img.convert("RGBA")
+            else:
+                img = img.convert("RGB")
+        elif img.mode == "LA":
+            # LA 模式（灰度+透明）：转换为 RGBA 以保持透明通道
+            img = img.convert("RGBA")
+        # RGBA 模式保持不变，直接使用
+        # RGB 等其他模式也保持不变
+        
         target_width = int(smart_doc.width)
         target_height = int(smart_doc.height)
         resized_img = resize_image_in_tiles(img, (target_width, target_height), tile_size)
 
-        resized_path = export_dir / f"{png_path.stem}_resized{png_path.suffix}"
+        # 如果图片有透明通道（RGBA 模式），保存为 PNG 格式以保留透明通道
+        if resized_img.mode == "RGBA":
+            resized_path = export_dir / f"{png_path.stem}_resized.png"
+        else:
+            resized_path = export_dir / f"{png_path.stem}_resized{png_path.suffix}"
         resized_img.save(resized_path, dpi=(int(smart_doc.resolution), int(smart_doc.resolution)))
 
     resized_img.close()
