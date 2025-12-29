@@ -159,15 +159,28 @@ def replace_smart_object_content(
     if not resized_path.exists():
         raise FileNotFoundError(f"缩放后的图片文件不存在: {resized_path}")
     
+    # 检查智能对象文档中是否有图层，如果有多个图层，需要先选择所有图层并替换
+    # 注意：不再删除图层，只进行替换操作
+    try:
+        if hasattr(smart_doc, 'layers') and len(smart_doc.layers) > 0:
+            print(f"    智能对象文档当前有 {len(smart_doc.layers)} 个图层")
+            # 选择第一个图层（通常是背景或主要图层）
+            if len(smart_doc.layers) > 0:
+                smart_doc.activeLayer = smart_doc.layers[0]
+                print(f"    已选择第一个图层进行替换")
+    except Exception as e:
+        print(f"    ⚠️ 警告: 检查图层时出错: {e}，继续执行替换")
+    
     # 方法1: 使用 placeEvent 放置图片（替换整个智能对象内容）
+    # 注意：placeEvent 会替换当前选中的图层或整个智能对象内容，不会删除图层
     place_desc = ActionDescriptor()
     place_desc.putPath(string_id("null"), str(resized_path))
     place_desc.putBoolean(string_id("antiAlias"), True)
     
     try:
-        # 执行放置操作
+        # 执行放置操作（这会替换智能对象的内容，而不是添加新图层）
         session.app.executeAction(string_id("placeEvent"), place_desc, DialogModes.DisplayNoDialogs)
-        print(f"    ✅ 图片已放置")
+        print(f"    ✅ 图片已放置（替换模式，不删除旧图层）")
         
         # 等待一下，让 PS 完成放置操作
         time.sleep(0.8)  # 增加等待时间，确保PS完成处理
@@ -179,7 +192,20 @@ def replace_smart_object_content(
             
             # 检查智能对象文档是否有图层
             if hasattr(current_smart_doc, 'layers') and len(current_smart_doc.layers) > 0:
-                print(f"    ✅ 验证: 智能对象文档包含 {len(current_smart_doc.layers)} 个图层")
+                layer_count = len(current_smart_doc.layers)
+                print(f"    ✅ 验证: 智能对象文档包含 {layer_count} 个图层")
+                
+                # 确保新放置的图层可见（placeEvent 应该会替换内容，但为了确保显示，检查图层可见性）
+                try:
+                    # 检查所有图层的可见性，确保新图层可见
+                    for i, layer in enumerate(current_smart_doc.layers):
+                        if hasattr(layer, 'visible'):
+                            if not layer.visible:
+                                print(f"    ⚠️ 警告: 图层 {i+1} 不可见，设置为可见")
+                                layer.visible = True
+                except Exception as vis_error:
+                    print(f"    ⚠️ 警告: 检查图层可见性时出错: {vis_error}，但继续执行")
+                
                 # 更新 smart_doc 引用为当前活动文档
                 smart_doc = current_smart_doc
             else:

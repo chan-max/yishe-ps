@@ -2,6 +2,7 @@
 PSD 导出模块
 包含多画板导出等复杂导出逻辑
 """
+import re
 import time
 from pathlib import Path
 from typing import Optional, List
@@ -409,14 +410,22 @@ def replace_and_export_psd_multi(
                         
                         # 检查文件是否存在
                         # 注意：SaveForWeb 可能会修改文件名（添加扩展名或修改名称）
+                        # Photoshop 会自动清理文件名中的特殊字符（空格、括号等）替换为 `-`
                         # 所以我们需要检查多种可能的文件名
                         max_retries = 10
                         retry_count = 0
                         actual_export_path = None
                         
+                        # 生成文件名变体（Photoshop 可能会修改特殊字符）
+                        # 将文件名中的空格、括号等特殊字符替换为 `-`（Photoshop 的行为）
+                        sanitized_name = re.sub(r'[ ()\[\]]+', '-', artboard_export_filename)
+                        sanitized_name = re.sub(r'-+', '-', sanitized_name)  # 多个 `-` 合并为一个
+                        sanitized_name = sanitized_name.strip('-')  # 去掉首尾的 `-`
+                        
                         # 可能的文件名变体
                         possible_paths = [
                             artboard_export_path,  # 原始路径
+                            export_dir / sanitized_name,  # Photoshop 清理后的文件名
                             export_dir / f"{artboard_export_path.stem}.png",  # 可能去掉后缀
                             export_dir / artboard_export_filename,  # 原始文件名
                         ]
@@ -442,13 +451,34 @@ def replace_and_export_psd_multi(
                                 if retry_count < max_retries:
                                     print(f"       等待文件生成... ({retry_count}/{max_retries})")
                         
+                        # 如果还是找不到，尝试在目录中搜索匹配的文件（基于时间戳和基本名称）
+                        if actual_export_path is None:
+                            print(f"       ⚠️ 未找到预期文件，尝试在目录中搜索匹配的文件...")
+                            try:
+                                # 提取时间戳部分（格式：_20251229_130113_085）
+                                timestamp_match = re.search(r'_(\d{8}_\d{6}_\d{3})', artboard_export_filename)
+                                if timestamp_match:
+                                    timestamp = timestamp_match.group(1)
+                                    # 搜索包含相同时间戳和画板标识的文件
+                                    search_pattern = f"*{timestamp}*artboard*画板*.png"
+                                    matching_files = list(export_dir.glob(search_pattern))
+                                    if matching_files:
+                                        # 按修改时间排序，取最新的
+                                        matching_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+                                        actual_export_path = matching_files[0]
+                                        print(f"       找到匹配的文件: {actual_export_path}")
+                            except Exception as search_error:
+                                print(f"       搜索文件时出错: {search_error}")
+                        
                         # 如果还是找不到，列出导出目录中的所有文件，帮助调试
                         if actual_export_path is None:
                             print(f"       ⚠️ 未找到预期文件，列出导出目录中的所有文件:")
                             try:
                                 dir_files = list(export_dir.glob("*"))
                                 if dir_files:
-                                    for df in sorted(dir_files):
+                                    # 只列出最近的文件（可能相关的）
+                                    dir_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+                                    for df in dir_files[:20]:  # 只显示最近20个文件
                                         print(f"          - {df.name} ({df.stat().st_size} 字节)")
                                 else:
                                     print(f"          (目录为空)")
@@ -565,40 +595,40 @@ def replace_and_export_psd_multi(
             print("未找到画板，将导出整张文档")
             print("=" * 70)
             
-        if output_filename is None:
-            output_filename = f"{psd_path.stem}_export.png"
-        
-        export_path = export_dir / output_filename
-        
-        # 检查导出路径的权限
-        print(f"\n⏳ 正在导出图片...")
-        has_permission, perm_error = check_write_permission(export_path)
-        if not has_permission:
-            print(f"\n    ❌ 权限检查失败: {perm_error}")
-            doc.close()
-            raise PermissionError(f"导出路径没有写入权限: {perm_error}")
-        
-        print(f"    ✅ 权限检查通过")
-        
-        try:
-            # 确保导出目录存在
-            export_path.parent.mkdir(parents=True, exist_ok=True)
+            if output_filename is None:
+                output_filename = f"{psd_path.stem}_export.png"
             
-            options = session.ExportOptionsSaveForWeb()
-            print(f"    导出路径: {export_path}")
-            doc.exportDocument(
-                str(export_path),
-                exportAs=session.ExportType.SaveForWeb,
-                options=options
-            )
-            print(f"    ✅ 导出成功")
-            export_paths.append(export_path)
-        except Exception as e:
-            print(f"\n❌ 导出失败: {e}")
-            import traceback
-            traceback.print_exc()
-            doc.close()
-            raise
+            export_path = export_dir / output_filename
+            
+            # 检查导出路径的权限
+            print(f"\n⏳ 正在导出图片...")
+            has_permission, perm_error = check_write_permission(export_path)
+            if not has_permission:
+                print(f"\n    ❌ 权限检查失败: {perm_error}")
+                doc.close()
+                raise PermissionError(f"导出路径没有写入权限: {perm_error}")
+            
+            print(f"    ✅ 权限检查通过")
+            
+            try:
+                # 确保导出目录存在
+                export_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                options = session.ExportOptionsSaveForWeb()
+                print(f"    导出路径: {export_path}")
+                doc.exportDocument(
+                    str(export_path),
+                    exportAs=session.ExportType.SaveForWeb,
+                    options=options
+                )
+                print(f"    ✅ 导出成功")
+                export_paths.append(export_path)
+            except Exception as e:
+                print(f"\n❌ 导出失败: {e}")
+                import traceback
+                traceback.print_exc()
+                doc.close()
+                raise
         
         print(f"\n" + "=" * 70)
         print("✅ 最终处理结果")

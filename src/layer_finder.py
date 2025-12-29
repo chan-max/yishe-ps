@@ -751,3 +751,4 @@ def find_smart_object_layers(doc, layer_name: Optional[str] = None, debug: bool 
     
     return smart_objects
 
+
