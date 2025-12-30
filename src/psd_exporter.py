@@ -9,6 +9,9 @@ from typing import Optional, List
 
 from photoshop import Session
 
+# 智能对象忽略标志：如果智能对象名称包含此标志（不区分大小写），将不会被处理
+IGNORE_SMART_OBJECT_PREFIX = "ignore"
+
 # 支持相对导入和绝对导入
 try:
     from .utils.permission_utils import check_write_permission
@@ -63,6 +66,21 @@ def replace_and_export_psd_multi(
             doc.close()
             raise ValueError("PSD 文件中没有找到任何智能对象图层")
         
+        # ========== 过滤掉包含忽略标志的智能对象 ==========
+        total_count = len(all_smart_objects)
+        ignored_smart_objects = []
+        filtered_smart_objects = []
+        
+        for so in all_smart_objects:
+            so_name = so.get('name', '')
+            # 检查智能对象名称是否包含忽略标志（不区分大小写）
+            if IGNORE_SMART_OBJECT_PREFIX.lower() in so_name.lower():
+                ignored_smart_objects.append(so)
+            else:
+                filtered_smart_objects.append(so)
+        
+        all_smart_objects = filtered_smart_objects
+        
         # ========== 打印 PSD 文件基本信息 ==========
         print("\n" + "=" * 70)
         print("📋 PSD 文件信息")
@@ -72,9 +90,26 @@ def replace_and_export_psd_multi(
         print(f"文档名称: {doc.name}")
         print(f"文档尺寸: {int(doc.width)} x {int(doc.height)} 像素")
         print(f"分辨率: {int(doc.resolution)} DPI")
-        print(f"智能图层总数: {len(all_smart_objects)}")
+        print(f"智能图层总数: {total_count}")
+        print(f"需要处理的智能对象: {len(all_smart_objects)}")
+        if ignored_smart_objects:
+            print(f"已忽略的智能对象: {len(ignored_smart_objects)} (包含标志 '{IGNORE_SMART_OBJECT_PREFIX}')")
         print(f"配置数量: {len(smart_objects_config)}")
         print("=" * 70)
+        
+        # 打印被忽略的智能对象信息
+        if ignored_smart_objects:
+            print("\n" + "=" * 70)
+            print("⏭️  已忽略的智能对象（包含标志 '{}'）".format(IGNORE_SMART_OBJECT_PREFIX))
+            print("=" * 70)
+            for i, so in enumerate(ignored_smart_objects, 1):
+                print(f"  [{i}] {so.get('name', '未知名称')}")
+                print(f"      路径: {so.get('path', '未知路径')}")
+            print("=" * 70)
+        
+        if not all_smart_objects:
+            doc.close()
+            raise ValueError(f"PSD 文件中的所有智能对象都包含忽略标志 '{IGNORE_SMART_OBJECT_PREFIX}'，没有可处理的智能对象")
         
         # ========== 匹配配置和智能对象 ==========
         # 匹配策略：

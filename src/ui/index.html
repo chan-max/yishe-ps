@@ -452,7 +452,7 @@
                   
                   <!-- 可视化预览区域 -->
                   <div v-if="state.analyzeData.artboards && state.analyzeData.artboards.length > 0" style="margin-top: 1.5rem; margin-bottom: 1.5rem;">
-                    <div style="background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; padding: 1rem; overflow: auto; max-height: 600px;">
+                    <div style="background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; padding: 1rem; overflow: auto; max-height: 480px;">
                       <!-- 文档容器 -->
                       <div 
                         ref="documentContainer"
@@ -537,6 +537,24 @@
                     </div>
                     <div style="text-align: center; margin-top: 0.5rem; color: #666; font-size: 0.85em;">
                       <p>缩放比例: {{ containerScale.toFixed(2) }}x | 文档尺寸: {{ state.analyzeData.document_info.width }} x {{ state.analyzeData.document_info.height }} px | 容器尺寸: {{ containerWidth }} x {{ containerHeight }} px</p>
+                    </div>
+                  </div>
+                  
+                  <!-- 精简信息 -->
+                  <div style="margin-top: 1.5rem; margin-bottom: 1.5rem;">
+                    <div class="ui segment" style="background: #fafafa; border: 1px solid #e0e0e0;">
+                      <h4 class="ui header" style="font-size: 1em; margin-bottom: 1rem;">
+                        <i class="code icon"></i>
+                        <div class="content">
+                          精简信息
+                          <div class="sub header" style="font-size: 0.75em;">画板和智能对象层级结构 (JSON)</div>
+                        </div>
+                      </h4>
+                      <div class="code-output" v-if="compactInfoJson">{{ compactInfoJson }}</div>
+                      <div v-else style="padding: 1.5rem; text-align: center; color: #999; font-size: 0.9em;">
+                        <i class="info circle icon"></i>
+                        暂无数据
+                      </div>
                     </div>
                   </div>
                   
@@ -962,6 +980,75 @@
           return state.debugLogs.filter(log => log.type === state.currentDebugTab);
         });
 
+        // 生成精简信息的 JSON 数据
+        const compactInfoJson = computed(() => {
+          if (!state.analyzeData) return '';
+          
+          try {
+            const result = {
+              artboards: []
+            };
+            
+            // 如果有画板
+            if (state.analyzeData.artboards && state.analyzeData.artboards.length > 0) {
+              state.analyzeData.artboards.forEach((artboard, artboardIndex) => {
+                const artboardInfo = {
+                  index: artboardIndex + 1,
+                  name: artboard.name,
+                  size: {
+                    width: artboard.size.width,
+                    height: artboard.size.height
+                  },
+                  position: {
+                    x: artboard.position.left !== undefined ? artboard.position.left : artboard.position.x || 0,
+                    y: artboard.position.top !== undefined ? artboard.position.top : artboard.position.y || 0
+                  },
+                  smart_objects: []
+                };
+                
+                // 添加智能对象
+                if (artboard.smart_objects && artboard.smart_objects.length > 0) {
+                  artboard.smart_objects.forEach((so, soIndex) => {
+                    artboardInfo.smart_objects.push({
+                      index: soIndex + 1,
+                      name: so.name,
+                      size: {
+                        width: so.size.width,
+                        height: so.size.height
+                      },
+                      position: {
+                        x: so.position.left !== undefined ? so.position.left : so.position.x || 0,
+                        y: so.position.top !== undefined ? so.position.top : so.position.y || 0
+                      }
+                    });
+                  });
+                }
+                
+                result.artboards.push(artboardInfo);
+              });
+            } 
+            // 如果没有画板但有智能对象
+            else if (state.analyzeData.smart_objects && state.analyzeData.smart_objects.length > 0) {
+              result.smart_objects = state.analyzeData.smart_objects.map((so, index) => ({
+                index: index + 1,
+                name: so.name,
+                size: {
+                  width: so.size.width,
+                  height: so.size.height
+                },
+                position: {
+                  x: so.position.left !== undefined ? so.position.left : so.position.x || 0,
+                  y: so.position.top !== undefined ? so.position.top : so.position.y || 0
+                }
+              }));
+            }
+            
+            return JSON.stringify(result, null, 2);
+          } catch (e) {
+            return '{}';
+          }
+        });
+
         // 计算各类型日志数量
         watch(() => state.debugLogs, () => {
           debugTabs.forEach(tab => {
@@ -1330,8 +1417,8 @@
           const docHeight = state.analyzeData.document_info.height;
 
           // 计算缩放比例以适应显示区域
-          const maxContainerWidth = 1200;
-          const maxContainerHeight = 600;
+          const maxContainerWidth = 1000;
+          const maxContainerHeight = 450;
           const scaleX = maxContainerWidth / docWidth;
           const scaleY = maxContainerHeight / docHeight;
           const scale = Math.min(scaleX, scaleY, 1); // 不超过 1，不放大
@@ -1394,7 +1481,8 @@
           containerHeight,
           containerScale,
           documentContainer,
-          calculateContainerSize
+          calculateContainerSize,
+          compactInfoJson
         };
       }
     }).mount('#app');
