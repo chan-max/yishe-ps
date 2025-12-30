@@ -499,23 +499,24 @@
                           v-for="(artboard, artboardIndex) in state.analyzeData.artboards"
                           :key="'artboard-so-' + artboardIndex"
                         >
-                          <div
-                            v-for="(so, soIndex) in artboard.smart_objects"
-                            :key="'so-' + artboardIndex + '-' + soIndex"
-                            :style="{
-                              position: 'absolute',
-                              left: ((so.position.left !== undefined ? so.position.left : so.position.x || 0) * containerScale) + 'px',
-                              top: ((so.position.top !== undefined ? so.position.top : so.position.y || 0) * containerScale) + 'px',
-                              width: (so.size.width * containerScale) + 'px',
-                              height: (so.size.height * containerScale) + 'px',
-                              backgroundColor: so.visible ? '#fff3e0' : '#f5f5f5',
-                              border: '1.5px solid ' + (so.visible ? '#ff9800' : '#999'),
-                              boxSizing: 'border-box',
-                              overflow: 'visible',
-                              zIndex: 5
-                            }"
-                            :title="so.name + ' (' + so.size.width + ' x ' + so.size.height + ' px) @ (' + (so.position.left !== undefined ? so.position.left : so.position.x || 0) + ', ' + (so.position.top !== undefined ? so.position.top : so.position.y || 0) + ')'"
-                          >
+                          <template v-for="(so, soIndex) in artboard.smart_objects">
+                            <div
+                              v-if="getSmartObjectVisibility(artboardIndex, soIndex, true)"
+                              :key="'so-' + artboardIndex + '-' + soIndex"
+                              :style="{
+                                position: 'absolute',
+                                left: ((so.position.left !== undefined ? so.position.left : so.position.x || 0) * containerScale) + 'px',
+                                top: ((so.position.top !== undefined ? so.position.top : so.position.y || 0) * containerScale) + 'px',
+                                width: (so.size.width * containerScale) + 'px',
+                                height: (so.size.height * containerScale) + 'px',
+                                backgroundColor: so.visible ? '#fff3e0' : '#f5f5f5',
+                                border: '1.5px solid ' + (so.visible ? '#ff9800' : '#999'),
+                                boxSizing: 'border-box',
+                                overflow: 'visible',
+                                zIndex: 5
+                              }"
+                              :title="so.name + ' (' + so.size.width + ' x ' + so.size.height + ' px) @ (' + (so.position.left !== undefined ? so.position.left : so.position.x || 0) + ', ' + (so.position.top !== undefined ? so.position.top : so.position.y || 0) + ')'"
+                            >
                             <!-- 智能对象标签（如果空间足够） -->
                             <div 
                               v-if="(so.size.width * containerScale) > 60 && (so.size.height * containerScale) > 20"
@@ -531,30 +532,13 @@
                             >
                               {{ so.size.width }}x{{ so.size.height }}
                             </div>
-                          </div>
+                            </div>
+                          </template>
                         </div>
                       </div>
                     </div>
                     <div style="text-align: center; margin-top: 0.5rem; color: #666; font-size: 0.85em;">
                       <p>缩放比例: {{ containerScale.toFixed(2) }}x | 文档尺寸: {{ state.analyzeData.document_info.width }} x {{ state.analyzeData.document_info.height }} px | 容器尺寸: {{ containerWidth }} x {{ containerHeight }} px</p>
-                    </div>
-                  </div>
-                  
-                  <!-- 精简信息 -->
-                  <div style="margin-top: 1.5rem; margin-bottom: 1.5rem;">
-                    <div class="ui segment" style="background: #fafafa; border: 1px solid #e0e0e0;">
-                      <h4 class="ui header" style="font-size: 1em; margin-bottom: 1rem;">
-                        <i class="code icon"></i>
-                        <div class="content">
-                          精简信息
-                          <div class="sub header" style="font-size: 0.75em;">画板和智能对象层级结构 (JSON)</div>
-                        </div>
-                      </h4>
-                      <div class="code-output" v-if="compactInfoJson">{{ compactInfoJson }}</div>
-                      <div v-else style="padding: 1.5rem; text-align: center; color: #999; font-size: 0.9em;">
-                        <i class="info circle icon"></i>
-                        暂无数据
-                      </div>
                     </div>
                   </div>
                   
@@ -593,11 +577,11 @@
                   <div v-if="state.analyzeData.artboards && state.analyzeData.artboards.length > 0" style="margin-top: 1.5rem;">
                     <h4 class="ui dividing header">画板列表 ({{ state.analyzeData.artboards.length }})</h4>
                     <div class="ui cards">
-                      <div v-for="(artboard, index) in state.analyzeData.artboards" :key="index" class="ui card" style="width: 100%; margin-bottom: 1rem;">
+                      <div v-for="(artboard, artboardIndex) in state.analyzeData.artboards" :key="artboardIndex" class="ui card" style="width: 100%; margin-bottom: 1rem;">
                         <div class="content">
                           <div class="header">
                             <i class="square outline icon"></i>
-                            画板 {{ index + 1 }}: {{ artboard.name }}
+                            画板 {{ artboardIndex + 1 }}: {{ artboard.name }}
                           </div>
                           <div class="meta" style="margin-top: 0.5rem;">
                             <span class="date">路径: {{ artboard.path }}</span>
@@ -624,8 +608,17 @@
                               <div class="ui relaxed divided list">
                                 <div v-for="(so, soIndex) in artboard.smart_objects" :key="soIndex" class="item" style="padding: 0.75rem;">
                                   <div class="content">
-                                    <div class="header" style="font-size: 0.9em;">
-                                      {{ soIndex + 1 }}. {{ so.name }}
+                                    <div class="header" style="font-size: 0.9em; display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;">
+                                      <span>{{ soIndex + 1 }}. {{ so.name }}</span>
+                                      <button 
+                                        class="ui button" 
+                                        :class="{ 'primary': getSmartObjectVisibility(artboardIndex, soIndex, true), 'basic': !getSmartObjectVisibility(artboardIndex, soIndex, true) }"
+                                        @click="toggleSmartObjectVisibility(artboardIndex, soIndex, true)"
+                                        style="padding: 0.65em 1.2em; font-size: 0.9em; flex-shrink: 0;"
+                                      >
+                                        <i :class="getSmartObjectVisibility(artboardIndex, soIndex, true) ? 'eye' : 'eye slash' + ' icon'"></i>
+                                        {{ getSmartObjectVisibility(artboardIndex, soIndex, true) ? '隐藏' : '显示' }}
+                                      </button>
                                     </div>
                                     <div class="description" style="margin-top: 0.5rem; font-size: 0.85em; color: #666;">
                                       <p><strong>路径:</strong> {{ so.path }}</p>
@@ -660,8 +653,17 @@
                     <div class="ui relaxed divided list">
                       <div v-for="(so, index) in state.analyzeData.smart_objects" :key="index" class="item" style="padding: 1rem;">
                         <div class="content">
-                          <div class="header">
-                            {{ index + 1 }}. {{ so.name }}
+                          <div class="header" style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;">
+                            <span>{{ index + 1 }}. {{ so.name }}</span>
+                            <button 
+                              class="ui button" 
+                              :class="{ 'primary': getSmartObjectVisibility(-1, index, false), 'basic': !getSmartObjectVisibility(-1, index, false) }"
+                              @click="toggleSmartObjectVisibility(-1, index, false)"
+                              style="padding: 0.65em 1.2em; font-size: 0.9em; flex-shrink: 0;"
+                            >
+                              <i :class="getSmartObjectVisibility(-1, index, false) ? 'eye' : 'eye slash' + ' icon'"></i>
+                              {{ getSmartObjectVisibility(-1, index, false) ? '隐藏' : '显示' }}
+                            </button>
                           </div>
                           <div class="description" style="margin-top: 0.5rem; font-size: 0.9em; color: #666;">
                             <p><strong>路径:</strong> {{ so.path }}</p>
@@ -671,6 +673,24 @@
                             <p v-if="so.opacity !== undefined"><strong>不透明度:</strong> {{ Math.round(so.opacity * 100) }}%</p>
                           </div>
                         </div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <!-- 精简信息 -->
+                  <div style="margin-top: 1.5rem; margin-bottom: 1.5rem;">
+                    <div class="ui segment" style="background: #fafafa; border: 1px solid #e0e0e0;">
+                      <h4 class="ui header" style="font-size: 1em; margin-bottom: 1rem;">
+                        <i class="code icon"></i>
+                        <div class="content">
+                          精简信息
+                          <div class="sub header" style="font-size: 0.75em;">画板和智能对象层级结构 (JSON)</div>
+                        </div>
+                      </h4>
+                      <div class="code-output" v-if="compactInfoJson">{{ compactInfoJson }}</div>
+                      <div v-else style="padding: 1.5rem; text-align: center; color: #999; font-size: 0.9em;">
+                        <i class="info circle icon"></i>
+                        暂无数据
                       </div>
                     </div>
                   </div>
@@ -917,6 +937,7 @@
           analyzeResult: '',
           analyzeData: null, // 解析后的分析数据（用于可视化）
           showVisualization: false, // 是否显示可视化
+          smartObjectVisibility: {}, // 智能对象可见性状态 { 'artboard-0-so-0': true, ... }
           processResult: '',
           debugLogs: [], // 调试日志数组
           loading: {
@@ -1249,6 +1270,25 @@
             state.analyzeResult = pretty(data);
             state.analyzeData = data; // 保存解析后的数据用于可视化
             state.showVisualization = true; // 自动显示可视化
+            
+            // 初始化所有智能对象的可见性为 true（默认都显示）
+            state.smartObjectVisibility = {};
+            if (data.artboards && data.artboards.length > 0) {
+              data.artboards.forEach((artboard, artboardIndex) => {
+                if (artboard.smart_objects) {
+                  artboard.smart_objects.forEach((so, soIndex) => {
+                    const key = `artboard-${artboardIndex}-so-${soIndex}`;
+                    state.smartObjectVisibility[key] = true;
+                  });
+                }
+              });
+            } else if (data.smart_objects && data.smart_objects.length > 0) {
+              data.smart_objects.forEach((so, soIndex) => {
+                const key = `no-artboard-so-${soIndex}`;
+                state.smartObjectVisibility[key] = true;
+              });
+            }
+            
             addDebugLog('PSD 分析成功', 'success');
             // 延迟计算容器尺寸，确保 DOM 已更新
             setTimeout(() => {
@@ -1258,10 +1298,27 @@
             state.analyzeResult = '';
             state.analyzeData = null;
             state.showVisualization = false;
+            state.smartObjectVisibility = {};
             addDebugLog(`PSD 分析失败: ${pretty(e.response?.data || e.message)}`, 'error');
           } finally {
             state.loading.analyze = false;
           }
+        }
+
+        // 切换智能对象可见性
+        function toggleSmartObjectVisibility(artboardIndex, soIndex, hasArtboard = true) {
+          const key = hasArtboard 
+            ? `artboard-${artboardIndex}-so-${soIndex}`
+            : `no-artboard-so-${soIndex}`;
+          state.smartObjectVisibility[key] = !state.smartObjectVisibility[key];
+        }
+
+        // 获取智能对象可见性
+        function getSmartObjectVisibility(artboardIndex, soIndex, hasArtboard = true) {
+          const key = hasArtboard 
+            ? `artboard-${artboardIndex}-so-${soIndex}`
+            : `no-artboard-so-${soIndex}`;
+          return state.smartObjectVisibility[key] !== false; // 默认 true
         }
 
         async function copyToClipboard(text) {
@@ -1482,7 +1539,9 @@
           containerScale,
           documentContainer,
           calculateContainerSize,
-          compactInfoJson
+          compactInfoJson,
+          toggleSmartObjectVisibility,
+          getSmartObjectVisibility
         };
       }
     }).mount('#app');
