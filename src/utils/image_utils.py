@@ -37,7 +37,8 @@ def resize_image_in_tiles(
         background_color: 背景色参数（已废弃，contain 模式使用透明背景）
         custom_options: 自定义模式配置（仅当 mode="custom" 时使用）
             - position: {x, y, unit} - 位置配置
-            - size: {width, height, unit, maintain_aspect_ratio} - 尺寸配置
+            - size: {width, height, unit} - 尺寸配置
+            - child_resize_mode: "cover" 或 "contain" - 在指定区域内的缩放模式
         
     Returns:
         缩放后的图像对象
@@ -125,17 +126,29 @@ def resize_image_in_tiles(
         # 解析配置
         position = custom_options.get('position', {})
         size = custom_options.get('size', {})
+        child_resize_mode = custom_options.get('child_resize_mode', 'contain')
         
-        # ========== 第一步：计算图片尺寸（相对于智能对象尺寸） ==========
+        # ========== 第一步：计算区域位置和尺寸（相对于智能对象尺寸） ==========
+        # 计算位置
+        pos_x = position.get('x', 0)
+        pos_y = position.get('y', 0)
+        pos_unit = position.get('unit', 'px')
+        
+        # 将位置转换为像素（如果是百分比，相对于智能对象尺寸）
+        if pos_unit == '%':
+            pos_x = int(target_width * pos_x / 100)
+            pos_y = int(target_height * pos_y / 100)
+        else:
+            pos_x = int(pos_x)
+            pos_y = int(pos_y)
+        
+        # 计算区域尺寸
         size_width = size.get('width', target_width)
         size_height = size.get('height', target_height)
         size_unit = size.get('unit', 'px')
-        maintain_aspect_ratio = size.get('maintain_aspect_ratio', False)
-        aspect_ratio_base = size.get('aspect_ratio_base', 'width')
         
         # 将尺寸转换为像素（如果是百分比，相对于智能对象尺寸）
         if size_unit == '%':
-            # 百分比：相对于智能对象的尺寸
             size_width = target_width * size_width / 100
             size_height = target_height * size_height / 100
         
@@ -143,53 +156,49 @@ def resize_image_in_tiles(
         size_width = int(size_width)
         size_height = int(size_height)
         
-        # 如果保持宽高比，根据指定的基准计算另一个维度（忽略另一个输入值）
-        if maintain_aspect_ratio:
-            aspect_ratio = orig_width / orig_height
-            if aspect_ratio_base == 'width':
-                # 以宽度为基准，高度自适应（完全忽略输入的 height）
-                calculated_height = int(size_width / aspect_ratio)
-                size_height = calculated_height
-            elif aspect_ratio_base == 'height':
-                # 以高度为基准，宽度自适应（完全忽略输入的 width）
-                calculated_width = int(size_height * aspect_ratio)
-                size_width = calculated_width
-            else:
-                raise ValueError(f"不支持的 aspect_ratio_base: {aspect_ratio_base}，支持的值: 'width', 'height'")
-        
-        # 确保尺寸有效
+        # 确保区域尺寸有效
         if size_width <= 0 or size_height <= 0:
-            raise ValueError(f"计算出的图片尺寸无效: {size_width} x {size_height}")
+            raise ValueError(f"指定的区域尺寸无效: {size_width} x {size_height}")
         
-        # ========== 第二步：缩放图片到计算出的尺寸 ==========
-        scaled_img = img.resize((size_width, size_height), Image.LANCZOS)
+        # ========== 第二步：在指定区域内按 child_resize_mode 缩放图片 ==========
+        if child_resize_mode == 'cover':
+            # cover 模式：铺满指定区域，居中裁剪
+            scale = max(size_width / orig_width, size_height / orig_height)
+            new_width = int(orig_width * scale)
+            new_height = int(orig_height * scale)
+            # 先缩放图片
+            scaled_img = img.resize((new_width, new_height), Image.LANCZOS)
+            # 居中裁剪到区域尺寸
+            offset_x = (new_width - size_width) // 2
+            offset_y = (new_height - size_height) // 2
+            scaled_img = scaled_img.crop((offset_x, offset_y, offset_x + size_width, offset_y + size_height))
+        elif child_resize_mode == 'contain':
+            # contain 模式：保持全部显示，在区域内居中
+            scale = min(size_width / orig_width, size_height / orig_height)
+            new_width = int(orig_width * scale)
+            new_height = int(orig_height * scale)
+            # 先缩放图片
+            scaled_img = img.resize((new_width, new_height), Image.LANCZOS)
+        else:
+            raise ValueError(f"不支持的 child_resize_mode: {child_resize_mode}，支持的值: 'cover', 'contain'")
         
         # 转换为 RGBA 模式以支持透明背景
         if scaled_img.mode != "RGBA":
             scaled_img = scaled_img.convert("RGBA")
         
-        # ========== 第三步：计算位置（相对于智能对象左上角） ==========
-        pos_x = position.get('x', 0)
-        pos_y = position.get('y', 0)
-        pos_unit = position.get('unit', 'px')
-        
-        # 将位置转换为像素（如果是百分比，相对于智能对象尺寸）
-        if pos_unit == '%':
-            # 百分比：相对于智能对象的尺寸
-            pos_x = int(target_width * pos_x / 100)
-            pos_y = int(target_height * pos_y / 100)
-        else:
-            # 像素：直接使用
-            pos_x = int(pos_x)
-            pos_y = int(pos_y)
-        
-        # ========== 第四步：创建智能对象尺寸的画布，并在指定位置粘贴图片 ==========
+        # ========== 第三步：创建智能对象尺寸的画布，并在指定位置粘贴图片 ==========
         # 创建透明背景的目标图像（RGBA 模式，使用智能对象的尺寸）
         resized_img = Image.new("RGBA", (target_width, target_height), (0, 0, 0, 0))
         
-        # 在指定位置粘贴图片（相对于左上角）
-        # 如果图片超出智能对象边界，paste 会自动裁剪超出部分
-        resized_img.paste(scaled_img, (pos_x, pos_y), scaled_img)
+        if child_resize_mode == 'contain':
+            # contain 模式：在区域内居中粘贴
+            offset_x = (size_width - new_width) // 2
+            offset_y = (size_height - new_height) // 2
+            resized_img.paste(scaled_img, (pos_x + offset_x, pos_y + offset_y), scaled_img)
+        else:
+            # cover 模式：直接粘贴（已经裁剪到区域尺寸）
+            resized_img.paste(scaled_img, (pos_x, pos_y), scaled_img)
+        
         scaled_img.close()
         return resized_img
     

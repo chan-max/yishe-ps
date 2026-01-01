@@ -226,23 +226,6 @@ class Size(BaseModel):
         description="单位：'px'（像素）或 '%'（百分比）",
         example="px"
     )
-    maintain_aspect_ratio: bool = Field(
-        False,
-        description="是否保持宽高比（如果为 True，需要指定 aspect_ratio_base）",
-        example=False
-    )
-    aspect_ratio_base: Optional[str] = Field(
-        None,
-        description="""
-        宽高比基准（仅当 maintain_aspect_ratio=true 时使用）
-        
-        - "width"：以宽度为基准，高度自适应。如果计算出的高度超出智能对象，会裁剪超出部分
-        - "height"：以高度为基准，宽度自适应。如果计算出的宽度超出智能对象，会裁剪超出部分
-        
-        当 maintain_aspect_ratio=false 时，此参数会被忽略
-        """,
-        example="width"
-    )
     
     @validator('unit')
     def validate_unit(cls, v):
@@ -257,23 +240,29 @@ class Size(BaseModel):
         if 'unit' in values and values['unit'] == '%' and (v < 0 or v > 100):
             raise ValueError(f"百分比值必须在 0-100 之间，当前值: {v}")
         return v
-    
-    @validator('aspect_ratio_base')
-    def validate_aspect_ratio_base(cls, v, values):
-        """验证宽高比基准"""
-        maintain_aspect_ratio = values.get('maintain_aspect_ratio', False)
-        if maintain_aspect_ratio:
-            if v is None:
-                raise ValueError("当 maintain_aspect_ratio=true 时，aspect_ratio_base 必须提供（'width' 或 'height'）")
-            if v not in {'width', 'height'}:
-                raise ValueError(f"aspect_ratio_base 必须是 'width' 或 'height'，当前值: {v}")
-        return v
 
 
 class CustomOptions(BaseModel):
     """自定义模式配置"""
     position: Position = Field(..., description="位置配置")
     size: Size = Field(..., description="尺寸配置")
+    child_resize_mode: str = Field(
+        "contain",
+        description="""
+        在指定区域内的缩放模式
+        
+        - "cover"：铺满指定区域，居中裁剪（保持宽高比，可能裁剪）
+        - "contain"：保持全部显示，在区域内居中（保持宽高比，可能有留白）
+        """,
+        example="contain"
+    )
+    
+    @validator('child_resize_mode')
+    def validate_child_resize_mode(cls, v):
+        """验证 child_resize_mode"""
+        if v not in {'cover', 'contain'}:
+            raise ValueError(f"child_resize_mode 必须是 'cover' 或 'contain'，当前值: {v}")
+        return v
 
 
 class SmartObjectConfig(BaseModel):
@@ -561,10 +550,10 @@ class ProcessRequest(BaseModel):
           - `width`: 宽度
           - `height`: 高度
           - `unit`: 单位，"px"（像素）或 "%"（百分比），默认 "px"
-          - `maintain_aspect_ratio`: 是否保持宽高比，默认 false
-          - `aspect_ratio_base`: 宽高比基准（仅当 maintain_aspect_ratio=true 时必需）
-            - "width"：以宽度为基准，高度自适应（如果超出智能对象会裁剪）
-            - "height"：以高度为基准，宽度自适应（如果超出智能对象会裁剪）
+        
+        - **child_resize_mode**：在指定区域内的缩放模式（默认 "contain"）
+          - "cover"：铺满指定区域，居中裁剪（保持宽高比，可能裁剪）
+          - "contain"：保持全部显示，在区域内居中（保持宽高比，可能有留白）
         
         **示例**：
         ```json
@@ -579,14 +568,14 @@ class ProcessRequest(BaseModel):
             "size": {
               "width": 800,
               "height": 600,
-              "unit": "px",
-              "maintain_aspect_ratio": false
-            }
+              "unit": "px"
+            },
+            "child_resize_mode": "contain"
           }
         }
         ```
         
-        **保持宽高比示例**：
+        **cover 模式示例**：
         ```json
         {
           "resize_mode": "custom",
@@ -599,10 +588,9 @@ class ProcessRequest(BaseModel):
             "size": {
               "width": 800,
               "height": 600,
-              "unit": "px",
-              "maintain_aspect_ratio": true,
-              "aspect_ratio_base": "width"
-            }
+              "unit": "px"
+            },
+            "child_resize_mode": "cover"
           }
         }
         ```
@@ -654,10 +642,10 @@ class ProcessRequest(BaseModel):
                                 },
                                 "size": {
                                     "height": 600,
-                                    "maintain_aspect_ratio": False,
                                     "unit": "px",
                                     "width": 800
-                                }
+                                },
+                                "child_resize_mode": "contain"
                                 },
                                 "image_path": "D:\\workspace\\yishe-ps\\examples\\re.jpg",
                                 "resize_mode": "custom",

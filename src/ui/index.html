@@ -783,8 +783,17 @@
                   </div>
                   
                   <div v-if="so.resize_mode === 'custom'" class="field form-field">
-                    <label>custom_options (JSON)</label>
-                    <textarea v-model="so.custom_options_text" placeholder='{"position": {"x": 0, "y": 0, "unit": "px"}, "size": {"width": 800, "height": 600, "unit": "px"}}' rows="4"></textarea>
+                    <label style="display: flex; align-items: center; justify-content: space-between;">
+                      <span>custom_options (JSON)</span>
+                      <select class="ui small dropdown" @change="fillCustomOptionsTemplate($event, index)" style="width: auto; min-width: 200px;">
+                        <option value="">选择预设模板...</option>
+                        <option value="px-contain">像素单位，contain 模式（完整显示）</option>
+                        <option value="px-cover">像素单位，cover 模式（铺满裁剪）</option>
+                        <option value="percent-contain">百分比单位，contain 模式（完整显示）</option>
+                        <option value="percent-cover">百分比单位，cover 模式（铺满裁剪）</option>
+                      </select>
+                    </label>
+                    <textarea v-model="so.custom_options_text" placeholder='{"position": {"x": 0, "y": 0, "unit": "px"}, "size": {"width": 800, "height": 600, "unit": "px"}, "child_resize_mode": "contain"}' rows="10" style="overflow-y: auto; resize: vertical;"></textarea>
                   </div>
                 </div>
                 
@@ -1096,6 +1105,42 @@
         function removeSmartObject(index) {
           if (state.process.smart_objects.length > 1) {
             state.process.smart_objects.splice(index, 1);
+          }
+        }
+
+        // 填充 custom_options 模板
+        function fillCustomOptionsTemplate(event, index) {
+          const template = event.target.value;
+          if (!template) return;
+          
+          const templates = {
+            'px-contain': {
+              position: { x: 0, y: 0, unit: 'px' },
+              size: { width: 800, height: 600, unit: 'px' },
+              child_resize_mode: 'contain'
+            },
+            'px-cover': {
+              position: { x: 0, y: 0, unit: 'px' },
+              size: { width: 800, height: 600, unit: 'px' },
+              child_resize_mode: 'cover'
+            },
+            'percent-contain': {
+              position: { x: 10, y: 10, unit: '%' },
+              size: { width: 80, height: 80, unit: '%' },
+              child_resize_mode: 'contain'
+            },
+            'percent-cover': {
+              position: { x: 10, y: 10, unit: '%' },
+              size: { width: 80, height: 80, unit: '%' },
+              child_resize_mode: 'cover'
+            }
+          };
+          
+          if (templates[template] && state.process.smart_objects[index]) {
+            state.process.smart_objects[index].custom_options_text = JSON.stringify(templates[template], null, 2);
+            // 重置下拉菜单
+            event.target.value = '';
+            addDebugLog(`已填充 custom_options 模板: ${template}`, 'success');
           }
         }
 
@@ -1531,6 +1576,7 @@
           copyAnalyzeResultEval,
           addSmartObject,
           removeSmartObject,
+          fillCustomOptionsTemplate,
           clearDebugLog,
           roundPercent,
           toggleVisualization,

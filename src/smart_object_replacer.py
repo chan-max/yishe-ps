@@ -115,11 +115,11 @@ def replace_smart_object_content(
             # 自定义模式的日志
             position = custom_options.get('position', {})
             size = custom_options.get('size', {})
+            child_resize_mode = custom_options.get('child_resize_mode', 'contain')
             print(f"    🎯 自定义模式配置:")
             print(f"       位置: ({position.get('x', 0)}{position.get('unit', 'px')}, {position.get('y', 0)}{position.get('unit', 'px')})")
             print(f"       尺寸: {size.get('width', 0)}{size.get('unit', 'px')} x {size.get('height', 0)}{size.get('unit', 'px')}")
-            if size.get('maintain_aspect_ratio', False):
-                print(f"       保持宽高比: 是")
+            print(f"       区域缩放模式: {child_resize_mode} ({'铺满裁剪' if child_resize_mode == 'cover' else '完整显示'})")
         elif resize_mode != "stretch" and abs(orig_ratio - target_ratio) > 0.01:
             print(f"    📐 比例不匹配:")
             print(f"       原始图片: {orig_width} x {orig_height} (比例 {orig_ratio:.3f})")
