@@ -1410,12 +1410,18 @@
         }
 
         async function processPsd() {
+          console.log('processPsd 函数被调用');
+          addDebugLog('开始验证处理参数...', 'info');
+          
           // 验证和规范化 PSD 路径
           state.process.psd_path = normalizePath(state.process.psd_path || '');
           if (!state.process.psd_path) {
             addDebugLog('请填写 PSD 路径', 'error');
             return;
           }
+          
+          console.log('PSD 路径:', state.process.psd_path);
+          console.log('智能对象数量:', state.process.smart_objects.length);
 
           // 验证和规范化智能对象配置
           const smartObjects = [];
@@ -1427,9 +1433,12 @@
               return;
             }
 
+            // 获取 resize_mode，如果未设置则使用默认值 'contain'
+            const resizeMode = so.resize_mode || 'contain';
+            
             const soConfig = {
               image_path: imagePath,
-              resize_mode: so.resize_mode || 'contain',
+              resize_mode: resizeMode,
               tile_size: so.tile_size || 512
             };
 
@@ -1438,8 +1447,8 @@
               soConfig.smart_object_name = stripQuotes(so.smart_object_name.trim());
             }
 
-            // 处理 custom_options
-            if (soConfig.resize_mode === 'custom') {
+            // 处理 custom_options（检查原始值，而不是可能被默认值覆盖的值）
+            if (resizeMode === 'custom') {
               if (so.custom_options_text && so.custom_options_text.trim()) {
                 try {
                   soConfig.custom_options = JSON.parse(so.custom_options_text);
@@ -1479,13 +1488,16 @@
             payload.output_filename = outputFilename;
           }
 
+          console.log('准备发送请求，payload:', payload);
           state.loading.process = true;
           addDebugLog(`开始处理 PSD: ${state.process.psd_path}\n配置了 ${smartObjects.length} 个智能对象`, 'info');
           try {
             const { data } = await client().post('/processPsd', payload);
+            console.log('处理成功，响应数据:', data);
             state.processResult = pretty(data);
             addDebugLog('PSD 处理成功', 'success');
           } catch (e) {
+            console.error('处理失败:', e);
             state.processResult = '';
             addDebugLog(`PSD 处理失败: ${pretty(e.response?.data || e.message)}`, 'error');
           } finally {
