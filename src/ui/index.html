@@ -797,6 +797,20 @@
                   </div>
                 </div>
                 
+                <!-- 实时显示后端参数 -->
+                <div class="ui segment" style="margin-top: 1.5rem; background: #f9f9f9;">
+                  <h4 class="ui dividing header" style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+                    <span>
+                      <i class="code icon"></i>
+                      后端参数（实时预览）
+                    </span>
+                    <button class="ui tiny button" @click="copyProcessPayload" title="复制参数">
+                      <i class="copy icon"></i> 复制
+                    </button>
+                  </h4>
+                  <div class="code-output" style="max-height: 400px; overflow-y: auto; margin-top: 0.5rem;">{{ processPayload }}</div>
+                </div>
+                
                 <div style="margin-top: 1rem;">
                   <button class="ui small primary button" :class="{ loading: state.loading.process }" @click="processPsd" :disabled="state.loading.process">
                     开始处理
@@ -1076,6 +1090,63 @@
             return JSON.stringify(result, null, 2);
           } catch (e) {
             return '{}';
+          }
+        });
+
+        // 实时计算当前配置对应的后端参数
+        const processPayload = computed(() => {
+          try {
+            const payload = {
+              psd_path: normalizePath(state.process.psd_path || ''),
+              smart_objects: [],
+              verbose: state.process.verbose
+            };
+
+            // 构建智能对象数组
+            state.process.smart_objects.forEach((so, index) => {
+              const imagePath = normalizePath(so.image_path || '');
+              const resizeMode = so.resize_mode || 'contain';
+              
+              const soConfig = {
+                image_path: imagePath,
+                resize_mode: resizeMode,
+                tile_size: so.tile_size || 512
+              };
+
+              // 添加智能对象名称（如果提供）
+              if (so.smart_object_name && so.smart_object_name.trim()) {
+                soConfig.smart_object_name = stripQuotes(so.smart_object_name.trim());
+              }
+
+              // 处理 custom_options
+              if (resizeMode === 'custom') {
+                if (so.custom_options_text && so.custom_options_text.trim()) {
+                  try {
+                    soConfig.custom_options = JSON.parse(so.custom_options_text);
+                  } catch (err) {
+                    // JSON 解析失败，标记错误但不阻止显示
+                    soConfig._error = `custom_options JSON 解析失败: ${err.message}`;
+                  }
+                }
+              }
+
+              payload.smart_objects.push(soConfig);
+            });
+
+            // 添加可选字段
+            const exportDir = normalizePath(state.process.export_dir || '');
+            if (exportDir) {
+              payload.export_dir = exportDir;
+            }
+
+            const outputFilename = stripQuotes(state.process.output_filename || '');
+            if (outputFilename) {
+              payload.output_filename = outputFilename;
+            }
+
+            return JSON.stringify(payload, null, 2);
+          } catch (e) {
+            return `{ "error": "参数计算失败: ${e.message}" }`;
           }
         });
 
@@ -1409,6 +1480,19 @@
           }
         }
 
+        async function copyProcessPayload() {
+          try {
+            const payload = processPayload.value || '';
+            if (!payload) {
+              throw new Error('没有可复制的内容');
+            }
+            await copyToClipboard(payload);
+            addDebugLog('后端参数已复制', 'success');
+          } catch (e) {
+            addDebugLog(`复制失败: ${e.message || e}`, 'error');
+          }
+        }
+
         async function processPsd() {
           console.log('processPsd 函数被调用');
           addDebugLog('开始验证处理参数...', 'info');
@@ -1599,7 +1683,9 @@
           calculateContainerSize,
           compactInfoJson,
           toggleSmartObjectVisibility,
-          getSmartObjectVisibility
+          getSmartObjectVisibility,
+          processPayload,
+          copyProcessPayload
         };
       }
     }).mount('#app');
