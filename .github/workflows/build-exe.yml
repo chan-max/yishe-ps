@@ -1,0 +1,84 @@
+name: Build Windows EXE
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - "package.json"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows-exe:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version
+        shell: pwsh
+        run: |
+          $pkg = Get-Content -Raw package.json | ConvertFrom-Json
+          $ver = [string]$pkg.version
+          if ([string]::IsNullOrWhiteSpace($ver)) { throw "package.json version is empty" }
+          "VERSION=$ver" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "VERSION=$ver"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build exe (PyInstaller spec)
+        shell: pwsh
+        run: |
+          pyinstaller --clean --noconfirm ps.spec
+
+      - name: Package artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          $zip = "out/yishe-ps-$env:VERSION-windows.zip"
+          if (Test-Path $zip) { Remove-Item -Force $zip }
+          Compress-Archive -Path "dist\*" -DestinationPath $zip
+          Write-Host "Created $zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: yishe-ps-${{ env.VERSION }}-windows
+          path: out/*.zip
+          if-no-files-found: error
+
+      - name: Create tag (vVERSION) if missing
+        shell: pwsh
+        run: |
+          $tag = "v$env:VERSION"
+          git fetch --tags --force
+          $exists = (git tag -l $tag)
+          if ($exists) {
+            Write-Host "Tag already exists: $tag"
+            exit 0
+          }
+          Write-Host "Creating tag: $tag"
+          git tag $tag
+          git push origin $tag
+
+      - name: Publish GitHub Release (auto)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          files: out/*.zip
+          generate_release_notes: true
