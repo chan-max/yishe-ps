@@ -80,6 +80,37 @@ def generate_unique_filename(original_filename: Optional[str], psd_path: Path) -
         psd_stem = psd_path.stem
         return f"{psd_stem}_export_{timestamp}.png"
 
+def format_time(seconds: float) -> str:
+    """
+    格式化处理时间为易读格式
+    
+    Args:
+        seconds: 处理时间(秒)
+    
+    Returns:
+        格式化的时间字符串
+    
+    Examples:
+        >>> format_time(5.23)
+        '5.23秒'
+        >>> format_time(90.5)
+        '1分30.50秒'
+        >>> format_time(3665.2)
+        '1小时1分5.20秒'
+    """
+    if seconds < 60:
+        return f"{seconds:.2f}秒"
+    elif seconds < 3600:
+        minutes = int(seconds // 60)
+        secs = seconds % 60
+        return f"{minutes}分{secs:.2f}秒"
+    else:
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = seconds % 60
+        return f"{hours}小时{minutes}分{secs:.2f}秒"
+
+
 # 导入功能模块
 try:
     from src.psd_img_replace_smartobject import process_psd_with_image, process_psd_with_image_multi
@@ -782,7 +813,9 @@ class ProcessResponse(BaseModel):
                     "export_file": "result.png",
                     "export_dir": r"D:\output",
                     "file_size": 1234567,
-                    "file_size_mb": 1.18
+                    "file_size_mb": 1.18,
+                    "processing_time": 5.23,
+                    "processing_time_formatted": "5.23秒"
                 },
                 "timestamp": "2024-01-01T12:00:00"
             }
@@ -1218,7 +1251,7 @@ async def process_psd(request: ProcessRequest, response: Response):
             }
             
             # 调用处理函数（新格式）
-            export_path = process_psd_with_image_multi(
+            export_paths, processing_time = process_psd_with_image_multi(
                 psd_path=request.psd_path,
                 config=config
             )
@@ -1248,7 +1281,7 @@ async def process_psd(request: ProcessRequest, response: Response):
             }
             
             # 统一使用 process_psd_with_image_multi（默认方法）
-            export_path = process_psd_with_image_multi(
+            export_paths, processing_time = process_psd_with_image_multi(
                 psd_path=request.psd_path,
                 config=config
             )
@@ -1271,10 +1304,10 @@ async def process_psd(request: ProcessRequest, response: Response):
         except Exception as e:
             print(f"⚠️ API层: 分析PSD获取画板数量时出错: {e}")
         
-        # export_path 现在统一返回列表
-        if isinstance(export_path, list):
+        # export_paths 现在统一返回列表
+        if isinstance(export_paths, list):
             # 处理列表中的每个路径（可能包含 None）
-            for i, path in enumerate(export_path):
+            for i, path in enumerate(export_paths):
                 if path and path.exists():
                     # 成功导出的文件
                     export_files.append({
@@ -1296,15 +1329,15 @@ async def process_psd(request: ProcessRequest, response: Response):
                         'success': False,
                         'error': '导出失败' if path is None else '文件不存在'
                     })
-        elif export_path:
+        elif export_paths:
             # 兼容旧格式（单个路径）
-            if export_path.exists():
+            if export_paths.exists():
                 export_files.append({
-                    'export_path': str(export_path),
-                    'export_file': export_path.name,
-                    'export_dir': str(export_path.parent),
-                    'file_size': export_path.stat().st_size,
-                    'file_size_mb': round(export_path.stat().st_size / 1024 / 1024, 2),
+                    'export_path': str(export_paths),
+                    'export_file': export_paths.name,
+                    'export_dir': str(export_paths.parent),
+                    'file_size': export_paths.stat().st_size,
+                    'file_size_mb': round(export_paths.stat().st_size / 1024 / 1024, 2),
                     'success': True
                 })
             else:
@@ -1340,7 +1373,9 @@ async def process_psd(request: ProcessRequest, response: Response):
         
         # 简化返回格式：只返回数组
         response_data = {
-            'export_files': export_files
+            'export_files': export_files,
+            'processing_time': round(processing_time, 2),  # 秒，保留2位小数
+            'processing_time_formatted': format_time(processing_time)  # 格式化的时间字符串
         }
         
         # 设置缓存控制头，避免 Swagger UI 显示旧结果

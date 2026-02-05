@@ -35,7 +35,7 @@ def replace_and_export_psd_multi(
     export_dir: Path,
     smart_objects_config: list[dict],
     output_filename: Optional[str] = None
-) -> List[Path]:
+) -> tuple[List[Path], float]:
     """
     处理 PSD 文件，支持多个智能对象的不同配置
     
@@ -46,8 +46,11 @@ def replace_and_export_psd_multi(
         output_filename: 导出文件名（可选）
     
     Returns:
-        导出的图片文件路径列表
+        tuple: (导出的图片文件路径列表, 处理时间(秒))
     """
+    # 记录开始时间
+    start_time = time.time()
+    
     # 使用辅助函数创建 Session（带重试逻辑）
     session = create_photoshop_session(max_retries=5, retry_delay=2)
     
@@ -668,6 +671,9 @@ def replace_and_export_psd_multi(
         print(f"\n" + "=" * 70)
         print("✅ 最终处理结果")
         print("=" * 70)
+        # 计算当前处理时间（用于中间显示）
+        current_processing_time = time.time() - start_time
+        print(f"处理耗时: {current_processing_time:.2f} 秒")
         print(f"共导出 {len(export_paths)} 个文件:")
         if export_paths:
             for i, path in enumerate(export_paths, 1):
@@ -704,8 +710,12 @@ def replace_and_export_psd_multi(
         except Exception as e:
             print(f"⚠️ 警告: 关闭主文档时出错: {e}")
     
+    # 计算处理时间
+    processing_time = time.time() - start_time
+    
     import gc
     gc.collect()
-    # 统一返回列表格式，方便处理
-    return export_paths if export_paths else []
+    
+    # 统一返回列表格式和处理时间
+    return (export_paths if export_paths else [], processing_time)
 
