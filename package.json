@@ -1,5 +1,9 @@
 {
   "name": "yishe-ps",
   "private": true,
-  "version": "0.0.1"
+  "version": "0.0.2",
+  "scripts": {
+    "build": "pyinstaller --clean --noconfirm ps.spec",
+    "version": "npm version patch && git push && git push --tags"
+  }
 }
