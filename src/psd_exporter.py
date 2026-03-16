@@ -420,8 +420,7 @@ def replace_and_export_psd_multi(
                     try:
                         options = session.ExportOptionsSaveForWeb()
                         
-                        # 记录导出前的状态
-                        print(f"       当前活动图层: {doc.activeLayer.name if hasattr(doc.activeLayer, 'name') else '未知'}")
+                        # 记录导出前的状态（新版API不再访问activeLayer，避免异常）
                         print(f"       导出区域: 整个文档（已隐藏其他图层组，只显示当前图层组）")
                         print(f"       导出文件: {artboard_export_filename}")
                         print(f"       导出目录: {export_dir}")
@@ -434,15 +433,10 @@ def replace_and_export_psd_multi(
                         export_file_path_str = str(artboard_export_path)
                         print(f"       导出路径（字符串）: {export_file_path_str}")
                         
-                        # 导出文档（只包含当前可见的图层组）
-                        # 注意：SaveForWeb 可能会自动添加扩展名，所以我们需要确保路径正确
-                        doc.exportDocument(
-                            export_file_path_str,
-                            exportAs=session.ExportType.SaveForWeb,
-                            options=options
-                        )
-                        print(f"    ✅ exportDocument 调用成功")
-                        
+                        # 使用 saveAs 方法导出 PNG，兼容新版 Photoshop API
+                        png_options = session.PNGSaveOptions()
+                        doc.saveAs(export_file_path_str, png_options, asCopy=True)
+                        print(f"    ✅ saveAs(PNG) 调用成功")
                         # 等待文件写入完成
                         time.sleep(2.0)  # 增加等待时间，确保文件写入完成
                         
@@ -651,15 +645,10 @@ def replace_and_export_psd_multi(
             try:
                 # 确保导出目录存在
                 export_path.parent.mkdir(parents=True, exist_ok=True)
-                
-                options = session.ExportOptionsSaveForWeb()
+                png_options = session.PNGSaveOptions()
                 print(f"    导出路径: {export_path}")
-                doc.exportDocument(
-                    str(export_path),
-                    exportAs=session.ExportType.SaveForWeb,
-                    options=options
-                )
-                print(f"    ✅ 导出成功")
+                doc.saveAs(str(export_path), png_options, asCopy=True)
+                print(f"    ✅ saveAs(PNG) 导出成功")
                 export_paths.append(export_path)
             except Exception as e:
                 print(f"\n❌ 导出失败: {e}")
