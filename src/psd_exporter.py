@@ -30,6 +30,17 @@ except ImportError:
         raise ImportError("无法导入必要的模块")
 
 
+def _safe_get_active_layer_name(doc) -> str:
+    """Photoshop 2025 下读取 activeLayer 有时会直接触发 COM 异常。"""
+    try:
+        active_layer = doc.activeLayer
+        if hasattr(active_layer, "name"):
+            return active_layer.name
+    except Exception as exc:
+        return f"无法读取 ({exc})"
+    return "未知"
+
+
 def replace_and_export_psd_multi(
     psd_path: Path,
     export_dir: Path,
@@ -418,10 +429,12 @@ def replace_and_export_psd_multi(
                     # 导出画板
                     print(f"    📤 正在导出到: {artboard_export_path}")
                     try:
-                        options = session.ExportOptionsSaveForWeb()
+                        png_options = session.PNGSaveOptions()
+                        png_options.compression = 6  # PNG 压缩级别 0-9
+                        png_options.interlaced = False
                         
                         # 记录导出前的状态
-                        print(f"       当前活动图层: {doc.activeLayer.name if hasattr(doc.activeLayer, 'name') else '未知'}")
+                        print(f"       当前活动图层: {_safe_get_active_layer_name(doc)}")
                         print(f"       导出区域: 整个文档（已隐藏其他图层组，只显示当前图层组）")
                         print(f"       导出文件: {artboard_export_filename}")
                         print(f"       导出目录: {export_dir}")
@@ -436,12 +449,9 @@ def replace_and_export_psd_multi(
                         
                         # 导出文档（只包含当前可见的图层组）
                         # 注意：SaveForWeb 可能会自动添加扩展名，所以我们需要确保路径正确
-                        doc.exportDocument(
-                            export_file_path_str,
-                            exportAs=session.ExportType.SaveForWeb,
-                            options=options
-                        )
-                        print(f"    ✅ exportDocument 调用成功")
+                        # PS 2025 兼容性修复：使用 saveAs 代替 exportDocument
+                        doc.saveAs(export_file_path_str, png_options, True, session.ExtensionType.Lowercase)
+                        print(f"    ✅ saveAs 调用成功 (PS 2025 兼容)")
                         
                         # 等待文件写入完成
                         time.sleep(2.0)  # 增加等待时间，确保文件写入完成
@@ -551,7 +561,7 @@ def replace_and_export_psd_multi(
                             export_paths.append(None)  # 占位，表示这个图层组导出失败
                             
                     except Exception as export_error:
-                        print(f"    ❌❌❌ exportDocument 调用失败: {export_error} ❌❌❌")
+                        print(f"    ❌❌❌ 导出调用失败: {export_error} ❌❌❌")
                         print(f"       图层组 [{i}/{len(layer_sets)}]: {artboard_name}")
                         import traceback
                         traceback.print_exc()
@@ -652,13 +662,12 @@ def replace_and_export_psd_multi(
                 # 确保导出目录存在
                 export_path.parent.mkdir(parents=True, exist_ok=True)
                 
-                options = session.ExportOptionsSaveForWeb()
+                png_options = session.PNGSaveOptions()
+                png_options.compression = 6  # PNG 压缩级别 0-9
+                png_options.interlaced = False
                 print(f"    导出路径: {export_path}")
-                doc.exportDocument(
-                    str(export_path),
-                    exportAs=session.ExportType.SaveForWeb,
-                    options=options
-                )
+                # PS 2025 兼容性修复：使用 saveAs 代替 exportDocument
+                doc.saveAs(str(export_path), png_options, True, session.ExtensionType.Lowercase)
                 print(f"    ✅ 导出成功")
                 export_paths.append(export_path)
             except Exception as e:
