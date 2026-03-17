@@ -435,6 +435,7 @@ def replace_and_export_psd_multi(
                         
                         # 记录导出前的状态
                         print(f"       当前活动图层: {_safe_get_active_layer_name(doc)}")
+                        # 记录导出前的状态（新版API不再访问activeLayer，避免异常）
                         print(f"       导出区域: 整个文档（已隐藏其他图层组，只显示当前图层组）")
                         print(f"       导出文件: {artboard_export_filename}")
                         print(f"       导出目录: {export_dir}")
