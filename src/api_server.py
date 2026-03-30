@@ -20,7 +20,7 @@ if sys.platform == 'win32':
     # 设置环境变量
     os.environ['PYTHONIOENCODING'] = 'utf-8'
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -206,9 +206,11 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",  # Vite 开发服务器
         "http://localhost:5174",  # Vite 备用端口
+        "http://localhost:1521",  # admin 本地开发端口
         "http://localhost:3000",  # 其他可能的开发服务器
         "http://localhost:1519",  # 本地客户端
         "http://localhost:1520",  # 主服务器
+        "https://1s.design",  # 生产主域名
         "https://1s.design:1520",  # 生产服务器
     ],
     allow_credentials=True,
@@ -216,6 +218,22 @@ app.add_middleware(
     allow_headers=["*"],  # 允许所有请求头
     expose_headers=["*"],  # 暴露所有响应头
 )
+
+
+@app.middleware("http")
+async def allow_private_network_access(request: Request, call_next):
+    """
+    允许来自安全上下文（如 https 管理后台）访问本机 localhost 服务。
+
+    Chrome 等浏览器对 Public -> Private/Local 的访问会发起 PNA 预检，
+    如果响应缺少 Access-Control-Allow-Private-Network: true，会直接拦截请求。
+    """
+    response = await call_next(request)
+
+    if request.method == "OPTIONS" and request.headers.get("access-control-request-private-network") == "true":
+        response.headers["Access-Control-Allow-Private-Network"] = "true"
+
+    return response
 
 # 挂载静态 UI（用于直接访问 Web 控制台）
 app.mount("/ui", StaticFiles(directory=STATIC_DIR, html=True), name="ui")
