@@ -14,6 +14,8 @@ permissions:
 jobs:
   build-windows-exe:
     runs-on: windows-latest
+    env:
+      RELEASE_ASSET_NAME: yishe-ps-windows.exe
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -46,20 +48,22 @@ jobs:
         run: |
           pyinstaller --clean --noconfirm ps.spec
 
-      - name: Package artifact
+      - name: Prepare release asset
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path out | Out-Null
-          $zip = "out/yishe-ps-$env:VERSION-windows.zip"
-          if (Test-Path $zip) { Remove-Item -Force $zip }
-          Compress-Archive -Path "dist\*" -DestinationPath $zip
-          Write-Host "Created $zip"
+          $sourceExe = "dist\\ps.exe"
+          if (-not (Test-Path $sourceExe)) { throw "Built exe not found: $sourceExe" }
+          $releaseExe = "out/$env:RELEASE_ASSET_NAME"
+          if (Test-Path $releaseExe) { Remove-Item -Force $releaseExe }
+          Copy-Item -LiteralPath $sourceExe -Destination $releaseExe
+          Write-Host "Prepared $releaseExe"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: yishe-ps-${{ env.VERSION }}-windows
-          path: out/*.zip
+          name: yishe-ps-${{ env.VERSION }}-windows-exe
+          path: out/${{ env.RELEASE_ASSET_NAME }}
           if-no-files-found: error
 
       - name: Create tag (vVERSION) if missing
@@ -76,9 +80,47 @@ jobs:
           git tag $tag
           git push origin $tag
 
+      - name: Remove old uploaded release assets
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "v$env:VERSION"
+          $expectedAsset = $env:RELEASE_ASSET_NAME
+          $headers = @{
+            Authorization = "Bearer $env:GITHUB_TOKEN"
+            Accept = "application/vnd.github+json"
+            "X-GitHub-Api-Version" = "2022-11-28"
+          }
+          $releaseUrl = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/tags/$tag"
+
+          try {
+            $release = Invoke-RestMethod -Headers $headers -Uri $releaseUrl
+          } catch {
+            $statusCode = $_.Exception.Response.StatusCode.value__
+            if ($statusCode -eq 404) {
+              Write-Host "Release not found for $tag yet, skipping asset cleanup"
+              exit 0
+            }
+            throw
+          }
+
+          $assetsToDelete = @($release.assets | Where-Object { $_.name -ne $expectedAsset })
+          if ($assetsToDelete.Count -eq 0) {
+            Write-Host "No old uploaded assets to delete"
+            exit 0
+          }
+
+          foreach ($asset in $assetsToDelete) {
+            $deleteUrl = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/assets/$($asset.id)"
+            Write-Host "Deleting old asset: $($asset.name)"
+            Invoke-RestMethod -Headers $headers -Method Delete -Uri $deleteUrl
+          }
+
       - name: Publish GitHub Release (auto)
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VERSION }}
-          files: out/*.zip
+          files: out/${{ env.RELEASE_ASSET_NAME }}
+          overwrite_files: true
           generate_release_notes: true
